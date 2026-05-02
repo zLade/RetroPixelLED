@@ -499,7 +499,7 @@ void initTime() {
 }
 
 // ====================================================================
-//                      MANEJADORES HTTP Y WEB
+//                      HTTP AND WEB HANDLERS
 // ====================================================================
 
 // --- Utility to convert HEX color to uint32_t ---
@@ -610,7 +610,7 @@ void handleSave() {
         interruptPlayback = false; 
     }
 
-    // 6. Respuesta Web
+    // 6. Web response
     server.sendHeader("Location", "/");
     server.send(302, "text/plain", "Saved");
 
@@ -677,11 +677,11 @@ void handleSaveConfig() {
     server.sendHeader("Location", "/config");
     server.send(302, "text/plain", "Configuration Saved");
 
-    Serial.println(">> Configuration saved y MQTT condicionado aplicado.");
+    Serial.println(">> Configuration saved and conditional MQTT handling applied.");
 }
 
 // ====================================================================
-//              ESTILO CSS CYBERPUNK UNIFICADO
+//              UNIFIED CYBERPUNK CSS STYLE
 // ====================================================================
 
 String getStyle() {
@@ -701,7 +701,7 @@ String getStyle() {
     s += "input:not([type='checkbox']):not([type='color']), select { width: 100%; padding: 12px; border-radius: 10px; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); color: #fff; font-size: 15px; margin-top: 5px; }";
     s += "label { display: block; margin-top: 15px; font-size: 11px; color: #00f2ff; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }";
     
-    /* --- ESTILO CHECKBOXES --- */
+    /* --- CHECKBOX STYLE --- */
     s += ".cb label { font-weight: normal; text-transform: none; color: #ccc; display: flex; align-items: center; gap: 10px; margin: 10px 0; font-size: 13px; cursor: pointer; }";
     s += ".cb input[type='checkbox'] { width: 18px; height: 18px; accent-color: #00f2ff; cursor: pointer; }";
 
@@ -731,7 +731,7 @@ String getStyle() {
 }
 
 // ====================================================================
-//                  INTERFAZ WEB PRINCIPAL
+//                  MAIN WEB INTERFACE
 // ====================================================================
 
 void handleRoot() {
@@ -753,7 +753,7 @@ void handleRoot() {
     char hexTextColor[8]; sprintf(hexTextColor, "#%06X", config.slidingTextColor); 
     int brightnessPercent = (int)(((float)config.brightness / 255.0) * 100.0);
 
-    // --- CHUNK 1: CABECERA Y ESTILOS ---
+    // --- CHUNK 1: HEADER AND STYLES ---
     String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'>";
     html += "<meta name='viewport' content='width=device-width,initial-scale=1,user-scalable=no'>";
     html += "<title>Retro Pixel LED</title><link rel='stylesheet' href='/style.css?v=3'></head><body><div class='c'>";
@@ -789,7 +789,7 @@ void handleRoot() {
     html += "<div style='display:flex; align-items:center; justify-content:space-between; background:rgba(0,242,255,0.05); padding:10px; border-radius:8px; margin-bottom:15px; border:1px solid rgba(0,242,255,0.1);'>";
     html += "  <label style='display:flex; align-items:center; cursor:pointer; font-size:13px; margin:0;'>";
     html += "    <input type='checkbox' name='ac' onchange='toggleAutoClock(this.checked)' " + String(config.autoClock ? "checked" : "") + " style='margin-right:8px;'>";
-    html += "   🕒 Mostar Clock";
+    html += "   🕒 Show Clock";
     html += "  </label>";
     html += "  <div id='autoClockSettings' style='display:" + String(config.autoClock ? "block" : "none") + ";'>";
     html += "    <span style='font-size:12px; color:#888;'>Every: </span>";
@@ -798,10 +798,10 @@ void handleRoot() {
     html += "  </div>";
     html += "</div>";
 
-    // Repeticiones y Orden
+    // Repeats and order
     html += "<div class='grid-2'>";
-    html += " <div><label>Repeticiones</label><input type='number' name='r' min='1' max='50' value='" + String(config.gifRepeats) + "'></div>";
-    html += " <div><label>Orden</label><select name='m'><option value='0'" + String(config.randomMode ? "" : " selected") + ">Secuencial</option><option value='1'" + String(config.randomMode ? " selected" : "") + ">Aleatorio</option></select></div>";
+    html += " <div><label>Repeats</label><input type='number' name='r' min='1' max='50' value='" + String(config.gifRepeats) + "'></div>";
+    html += " <div><label>Order</label><select name='m'><option value='0'" + String(config.randomMode ? "" : " selected") + ">Sequential</option><option value='1'" + String(config.randomMode ? " selected" : "") + ">Random</option></select></div>";
     html += "</div>";
     
     // Playlist data source
@@ -835,7 +835,7 @@ void handleRoot() {
     } else {
         html += "<p style='color:#ff2e63; font-size:11px;'>⚠️ SD NOT DETECTED</p>";
     }
-    html += "</div></div></div></div>"; // Cerramos foldersBlock y gifConfig
+    html += "</div></div></div></div>"; // Close foldersBlock and gifConfig
     server.sendContent(html);
 
     // --- CHUNK 5: TEXT, CLOCK, AND FOOTER (Cleaned) ---
@@ -850,7 +850,7 @@ void handleRoot() {
     html += "<div id='clockConfig' style='display:" + String(config.playMode == 2 ? "block" : "none") + ";'>";
     html += "<div class='card'><h3>Configuration Clock</h3>";
     html += "<div class='grid-2' style='align-items: center;'>";
-    html += " <div><label>Efecto Visual</label><select name='clockEffect'>";
+    html += " <div><label>Visual Effect</label><select name='clockEffect'>";
     const char* effects[] = {"Rainbow Flow", "Static Rainbow", "Solid Neon", "Night Fire", "Pulse Breath", "Matrix Digital", "Color Gradient 50%", "Color Gradient 80%"};
     for(int i = 0; i < 8; i++) {
         html += "<option value='" + String(i) + "'" + (config.clockEffect == i ? " selected" : "") + ">" + effects[i] + "</option>";
@@ -860,7 +860,7 @@ void handleRoot() {
     html += "</div></div></div>"; 
     server.sendContent(html);
 
-    // Botones y Footer
+    // Buttons and footer
     html = "<button type='submit' class='btn save-btn'>SAVE CHANGES</button>";
     html += "<div class='grid-3'>";
     html += " <a href='/config' class='btn settings-btn'>SETTINGS</a>";
@@ -901,7 +901,7 @@ void handleConfig() {
     server.setContentLength(CONTENT_LENGTH_UNKNOWN);
     server.send(200, "text/html", "");
 
-    // --- CHUNK 1: CABECERA Y WIFI ---
+    // --- CHUNK 1: HEADER AND WIFI ---
     String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'>";
     html += "<meta name='viewport' content='width=device-width,initial-scale=1,user-scalable=no'>";
     html += "<title>Configuration</title><link rel='stylesheet' href='/style.css?v=3'></head><body><div class='c'>";
@@ -946,12 +946,12 @@ void handleConfig() {
     html += "<div id='mqtt_fields' style='display:" + String(config.mqtt_enabled ? "block" : "none") + "; margin-top:10px;'>";
     html += "<label>Device Name</label><input type='text' name='m_name' value='" + String(config.mqtt_name) + "'>";
     html += "<div class='grid-2'><div><label>Broker IP</label><input type='text' name='m_host' value='" + String(config.mqtt_host) + "'></div>";
-    html += "<div><label>Puerto</label><input type='number' name='m_port' value='" + String(config.mqtt_port) + "'></div></div>";
-    html += "<label>Usuario</label><input type='text' name='m_user' value='" + String(config.mqtt_user) + "'>";
+    html += "<div><label>Port</label><input type='number' name='m_port' value='" + String(config.mqtt_port) + "'></div></div>";
+    html += "<label>Username</label><input type='text' name='m_user' value='" + String(config.mqtt_user) + "'>";
     html += "<label>Password</label><input type='password' name='m_pass' value='" + String(config.mqtt_pass) + "'></div></div>";
     server.sendContent(html);
 
-    // --- CHUNK 4: BOTONES Y FOOTER ---
+    // --- CHUNK 4: BUTTONS AND FOOTER ---
     html = "<div class='dual-grid' style='grid-template-columns: repeat(3, 1fr); margin-bottom: 20px;'>";
     html += "<button type='submit' class='btn save-btn'>SAVE</button>";
     html += "<button type='button' class='btn restart-btn' onclick=\"if(confirm('Restart?')) location.href='/restart';\">RESET</button>";
@@ -967,7 +967,7 @@ void handleConfig() {
 }
 
 // ====================================================================
-//                  INTERFAZ WEB OTA
+//                  OTA WEB INTERFACE
 // ====================================================================
 
 void handleOTA() {
@@ -1037,7 +1037,7 @@ void handleOTAUpload() {
             ESP.restart();
         } else {
             Update.printError(Serial);
-            server.send(500, "text/plain", "Error Finalizando OTA");
+            server.send(500, "text/plain", "Error finalizing OTA");
         }
     }
 }
@@ -1165,7 +1165,7 @@ void handleFileDelete() {
         }
     }
 
-    // 2. PAUSA: Small pause so the SD updates its file table
+    // 2. PAUSE: Small pause so the SD updates its file table
     delay(100);
 
     // 3. REDIRECT: Force the browser to reload the clean file list
@@ -1240,7 +1240,7 @@ String fileManagerPage(String path) {
 
     // --- CARD 1: MULTIPLE UPLOAD ---
     html += "<div class='card'><h2>Upload Files</h2>";
-    html += "<div class='info-box'>Subiendo a: <code>" + path + "</code></div>";
+    html += "<div class='info-box'>Uploading to: <code>" + path + "</code></div>";
     html += "<form method='POST' action='/upload' enctype='multipart/form-data' style='margin-top:15px;'>";
     html += "<input type='file' name='upload' id='file-input' multiple style='display:none;' onchange='document.getElementById(\"file-name\").innerHTML = this.files.length + \" file(s) selected\"'>";
     html += "<label for='file-input' class='btn' style='background:rgba(0,242,255,0.05); border:1px dashed #00f2ff; color:#00f2ff; margin-bottom:10px;'>📂 SELECT GIFS</label>";
@@ -1317,7 +1317,7 @@ String fileManagerPage(String path) {
 
     // Button to return home
     html += "<div style='text-align:center; margin-top:20px; margin-bottom:20px;'>";
-    html += "<a href='/' class='btn back-btn' style='display:inline-block; width:auto; min-width:200px; max-width:90%;'>BACK TO PANEL PRINCIPAL</a>";
+    html += "<a href='/' class='btn back-btn' style='display:inline-block; width:auto; min-width:200px; max-width:90%;'>BACK TO MAIN PANEL</a>";
     html += "</div>";
 
     uint64_t totalBytes = SD.totalBytes();
@@ -1592,7 +1592,7 @@ void scanFolders(String basePath) {
     while(entry){
         if(entry.isDirectory()){
             String dirName = entry.name();
-            // Build the full path (Ejemplo: /gifs/animals)
+            // Build the full path (example: /gifs/animals)
             String fullPath = basePath + "/" + dirName; 
             
             // Add to the list shown in the web UI
@@ -1879,7 +1879,7 @@ void runGifMode() {
             gif.close();
             
         } else {
-            Serial.printf("Error abriendo GIF: %s\n", gifPath.c_str());
+            Serial.printf("Error opening GIF: %s\n", gifPath.c_str());
             // If a specific file fails, do not stop everything; just show a brief error
             showMessage("Error GIF", display->color565(255, 255, 0));
             
@@ -1892,7 +1892,7 @@ void runGifMode() {
         }
     }
 
-    // 3. CAMBIO: ELIMINADO currentGifIndex++; 
+    // 3. CHANGE: removed currentGifIndex++; 
     // getNextGifFromSD() already advances the cursor automatically.
 }
 
@@ -1925,7 +1925,7 @@ void runTextMode() {
             marqueeXPos = display->width(); 
         }
 
-        // 3. Dibujado
+        // 3. Drawing
         display->fillScreen(0); // Clean buffer
         // MATRIX_HEIGHT / 2 - 4 usually centers the standard 7-8px font well
         display->setCursor(marqueeXPos, (MATRIX_HEIGHT / 2) - (h / 2));
@@ -1934,7 +1934,7 @@ void runTextMode() {
     }
 }
 
-// 2. Ejecutar Clock Mode Completo HH:MM:SS
+// 2. Run complete clock mode HH:MM:SS
 void runClockMode() {
     struct tm timeinfo;
     if (!getLocalTime(&timeinfo)) return;
@@ -2146,7 +2146,7 @@ void reconnectMQTT() {
             // 1. DYNAMIC WILDCARD SUBSCRIPTION
             // Listen to everything HA sends to our ID
             mqttClient.subscribe(("retropixel/" + technicalID + "/cmd/#").c_str());
-            Serial.println("Suscrito a: retropixel/" + technicalID + "/cmd/#");
+            Serial.println("Subscribed to: retropixel/" + technicalID + "/cmd/#");
 
             // 2. Send Discovery so it appears or updates in HA
             sendMQTTDiscovery();
@@ -2186,7 +2186,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     String stateTopicPrefix = "retropixel/" + technicalID + "/state/";
     String strTopic = String(topic);
 
-    Serial.println("MQTT Recibido [" + strTopic + "]: " + message);
+    Serial.println("MQTT received [" + strTopic + "]: " + message);
 
     // ----------------------------------------------------
     // 1. MODE CONTROL (GIFs, Text, Clock, Arcade)
@@ -2249,11 +2249,11 @@ void callback(char* topic, byte* payload, unsigned int length) {
         Serial.println("New MQTT text (slidingText): " + message);
     }
     // ----------------------------------------------------
-    // 5. NOTIFICATIONS Y TIME
+    // 5. NOTIFICATIONS AND TIME
     // ---------------------------------------------------- 
     else if (strTopic.endsWith("/cmd/temp")) {
          mqtt_temp = message; 
-         Serial.println("MQTT Temp recibida: " + mqtt_temp);
+         Serial.println("MQTT temperature received: " + mqtt_temp);
     }
     else if (strTopic.endsWith("/cmd/weather")) { 
         mqtt_weather_icon = message.toInt(); 
@@ -2283,7 +2283,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
             saveSystemConfig();
             mqttClient.publish((stateTopicPrefix + "clock_style").c_str(), message.c_str(), true);
             if(config.playMode == 2) display->fillScreen(0);
-            Serial.printf("MQTT Estilo ID %d aplicado.\n", selected);
+            Serial.printf("MQTT style ID %d applied.\n", selected);
         }
     }
     // ----------------------------------------------------
@@ -2366,11 +2366,11 @@ void syncMQTTState() {
     Serial.println("MQTT: State synchronization sent to HA (Mode: " + modeText + ")");
 }
 
-// --- TAREAS DUAL CORE ---
+// --- DUAL CORE TASKS ---
 void TaskDisplay(void * pvParameters);
 
 // ====================================================================
-//                             SETUP Y LOOP
+//                             SETUP AND LOOP
 // ====================================================================
 
 void setup() {
@@ -2537,7 +2537,7 @@ void setup() {
     server.on("/restart", HTTP_GET, handleRestart); 
     server.on("/factory_reset", HTTP_GET, handleFactoryReset);
 
-    // ESTILO CSS
+    // CSS STYLE
     server.on("/style.css", HTTP_GET, [](){
         server.sendHeader("Cache-Control", "max-age=86400"); // 1-day cache
         server.setContentLength(CONTENT_LENGTH_UNKNOWN);     // Announce chunked sending
@@ -2654,7 +2654,7 @@ void loop() {
             }
         }
 
-        // 3. Procesar servidor web
+        // 3. Process web server
         server.handleClient();
 
         // 3.1 Automatic reconnection retry (background)
