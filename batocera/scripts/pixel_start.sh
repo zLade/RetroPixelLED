@@ -1,17 +1,17 @@
 #!/bin/bash
 IP_ESP32="192.168.1.109"
 
-# Limpiamos el sistema: de /userdata/roms/snes/... sacamos solo "snes"
-SISTEMA_SUCIO="$1"
-SISTEMA=$(echo "$SISTEMA_SUCIO" | awk -F'/' '{print $(NF-1)}')
+# Clean the system: de /userdata/roms/snes/... keep only "snes"
+RAW_SYSTEM="$1"
+SYSTEM=$(echo "$RAW_SYSTEM" | awk -F'/' '{print $(NF-1)}')
 
-# Limpiamos el juego: quitamos ruta, extensión y barras invertidas
-JUEGO_SUCIO=$(basename -- "$2")
-JUEGO_SIN_EXT="${JUEGO_SUCIO%.*}"
-JUEGO_LIMPIO=$(echo "$JUEGO_SIN_EXT" | sed 's/\\//g')
+# Clean the game: remove path, extension, and backslashes
+RAW_GAME=$(basename -- "$2")
+GAME_WITHOUT_EXT="${RAW_GAME%.*}"
+CLEAN_GAME=$(echo "$GAME_WITHOUT_EXT" | sed 's/\\//g')
 
-# Enviamos los datos ya limpios
+# Send the cleaned data
 curl -s -G \
-    --data-urlencode "s=$SISTEMA" \
-    --data-urlencode "g=$JUEGO_LIMPIO" \
+    --data-urlencode "s=$SYSTEM" \
+    --data-urlencode "g=$CLEAN_GAME" \
     "http://$IP_ESP32/batocera" > /dev/null &

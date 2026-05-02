@@ -5,30 +5,30 @@
 #include <time.h>
 #include <vector>
 #include <algorithm>
-#include <Update.h>       // Librería para la funcionalidad OTA
-#include <DNSServer.h>    // Requerido por WiFiManager
-#include <WiFiManager.h>  // Librería para gestión WiFi
-#include <PubSubClient.h> // Librería para MQTT Integración en Home Assistant
+#include <Update.h>       // Library for OTA functionality
+#include <DNSServer.h>    // Required by WiFiManager
+#include <WiFiManager.h>  // Library for WiFi management
+#include <PubSubClient.h> // Library for MQTT integration with Home Assistant
 
-// --- LIBRERÍAS DE HARDWARE ---
-#include "SD.h"           // Gestión de la Micro SD
-#include "AnimatedGIF.h"  // Decodificador de GIFs
-#include <ESP32-HUB75-MatrixPanel-I2S-DMA.h> // Gestión del panel LED
+// --- HARDWARE LIBRARIES ---
+#include "SD.h"           // Micro SD management
+#include "AnimatedGIF.h"  // GIF decoder
+#include <ESP32-HUB75-MatrixPanel-I2S-DMA.h> // LED panel management
 
 // ====================================================================
-//                          CONSTANTES & FIRMWARE
+//                          CONSTANTS & FIRMWARE
 // ====================================================================
-#define FIRMWARE_VERSION "4.0.0" // Se añade soporte a selecionar diferentes Playlist de GIFs
+#define FIRMWARE_VERSION "4.0.0" // Adds support for selecting different GIF playlists
 #define PREF_NAMESPACE "pixel_config"
 #define DEVICE_NAME_DEFAULT "RetroPixel-Default"
-#define TZ_STRING_SPAIN "CET-1CEST,M3.5.0,M10.5.0/3" // Cadena TZ por defecto segura
-#define GIFS_BASE_PATH "/gifs" // Directorio base para los GIFs
-#define GIF_CACHE_FILE "/gif_cache.txt" // Archivo para guardar el índice de GIFs
-#define GIF_CACHE_SIG "/gif_cache.sig" // Archivo de firma
+#define TZ_STRING_SPAIN "CET-1CEST,M3.5.0,M10.5.0/3" // Safe default TZ string
+#define GIFS_BASE_PATH "/gifs" // Base directory for GIFs
+#define GIF_CACHE_FILE "/gif_cache.txt" // File used to store the GIF index
+#define GIF_CACHE_SIG "/gif_cache.sig" // Signature file
 #define M5STACK_SD SD
 
-// --- NUEVA DEFINICIÓN DE PINES HUB75 ---
-// Estos pines usan una combinación segura fuera del bus SD/Flash.
+// --- NEW HUB75 PIN DEFINITION ---
+// These pins use a safe combination outside the SD/Flash bus.
 #define CLK_PIN       16
 #define OE_PIN        15
 #define LAT_PIN       4
@@ -36,7 +36,7 @@
 #define B_PIN         32
 #define C_PIN         22
 #define D_PIN         17
-#define E_PIN         -1 // Desactivado para paneles 64x32 (escaneo 1/16)
+#define E_PIN         -1 // Disabled for 64x32 panels (1/16 scan)
 #define R1_PIN        25
 #define G1_PIN        26
 #define B1_PIN        27
@@ -44,92 +44,92 @@
 #define G2_PIN        12
 #define B2_PIN        13
 
-// --- NUEVA DEFINICIÓN DE PINES SPI SD (Nativos VSPI) ---
-// Estos pines usan el bus VSPI de hardware para mayor velocidad.
+// --- NEW SD SPI PIN DEFINITION (Native VSPI) ---
+// These pins use the hardware VSPI bus for better speed.
 #define SD_CS_PIN     5   
 #define VSPI_MISO     19
 #define VSPI_MOSI     23
 #define VSPI_SCLK     18
 
-// Definiciones de panel
+// Panel definitions
 const int PANEL_RES_X = 64; 
 const int PANEL_RES_Y = 32;
 #define MATRIX_HEIGHT PANEL_RES_Y 
 
-// Variables globales para el sistema
+// Global system variables
 WebServer server(80);
 Preferences preferences;
 WiFiManager wm;
 AnimatedGIF gif;
 MatrixPanel_I2S_DMA *display = nullptr; 
-TaskHandle_t displayTaskHandle = NULL; // Manejador para poder matar la tarea en OTA
+TaskHandle_t displayTaskHandle = NULL; // Handle used to stop the task during OTA
 
 
-// Variables de estado y reproducción
-bool sdMontada = false;
-bool enModoGestion = false;
-bool interrumpirReproduccion = false;
-unsigned long gifCachePosition = 0; // Guardamos la posición del cursor en el archivo txt
-bool hayGifsEnCache = false;        // Bandera simple para saber si hay contenido
-int x_offset = 0; // Offset para centrado GIF
+// State and playback variables
+bool sdMounted = false;
+bool inFileManagerMode = false;
+bool interruptPlayback = false;
+unsigned long gifCachePosition = 0; // Stores the cursor position in the text file
+bool hasGifsInCache = false;        // Simple flag to know whether there is content
+int x_offset = 0; // Offset for GIF centering
 int y_offset = 0;
-int contadorGifsReproducidos = 0;
-unsigned long tiempoInicioRelojForzado = 0;
-bool modoRelojTemporalActivo = false;
-const long DURACION_RELOJ_MS = 10000;  // Mostrar reloj durante 10 segundos
+int playedGifCount = 0;
+unsigned long forcedClockStartTime = 0;
+bool temporaryClockModeActive = false;
+const long CLOCK_DURATION_MS = 10000;  // Show the clock for 10 seconds
 
-// Variables de modos
-int xPosMarquesina = 0;
+// Mode variables
+int marqueeXPos = 0;
 unsigned long lastScrollTime = 0;
 const char* ntpServer = "pool.ntp.org";
 
-// Variable global para la ruta del GIF de Batocera
-String juegoActual = "default";
-String sistemaActual = "default";
-String rutaGifArcade = "/batocera/default/_default.gif";
+// Global variable for the Batocera GIF path
+String currentGame = "default";
+String currentSystem = "default";
+String arcadeGifPath = "/batocera/default/_default.gif";
 
-// --- GESTIÓN DE RUTA SD ---
-String currentPath = "/"; // Ruta actual para el administrador de archivos
-File fsUploadFile; // Variable global para la subida de archivos
-File FSGifFile;    // Variable global para el manejo de archivos GIF
+// --- SD PATH MANAGEMENT ---
+String currentPath = "/"; // Current path for the file manager
+File fsUploadFile; // Global variable for file uploads
+File FSGifFile;    // Global variable for GIF file handling
 File currentFile; 
-bool recargarGifsPendiente = false; // Indica si hay un escaneo de SD pendiente
-SemaphoreHandle_t sdMutex; // Semáforo para proteger el acceso a la SD y el Bus SPI
+bool pendingGifReload = false; // Indicates whether an SD scan is pending
+SemaphoreHandle_t sdMutex; // Semaphore used to protect SD and SPI bus access
 
 
-// --- CONFIGURACIÓN MQTT ---
-String chipID; // Aquí guardaremos el ID basado en la MAC
+// --- MQTT CONFIGURATION ---
+String chipID; // Stores the MAC-based ID
 
-// Datos dinámicos desde MQTT
-String mqtt_temp = "--";    // Temperatura (ej: "22°")
-int mqtt_weather_icon = 0;  // 0:Sol, 1:Lluvia, 2:Nubes, 3:Nieve...
-String mqtt_custom_msg = ""; // Notificación
+// Dynamic data from MQTT
+String mqtt_temp = "--";    // Temperature (e.g.: "22°")
+int mqtt_weather_icon = 0;  // 0:Sun, 1:Rain, 2:Clouds, 3:Snow...
+String mqtt_custom_msg = ""; // Notification
 
-// Clientes
+// Clients
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 
-// Topics para Auto-Discovery
+// Topics for Auto-Discovery
 const char* discovery_topic_bright = "homeassistant/number/retropixel/brightness/config";
 const char* discovery_topic_mode = "homeassistant/select/retropixel/mode/config";
 const char* discovery_topic_text = "homeassistant/text/retropixel/message/config";
 
-// Topics (Temas)
-const char* topic_cmd_mode = "retropixel/cmd/mode";   // Cambiar modo
-const char* topic_cmd_bright = "retropixel/cmd/bright"; // Cambiar brillo
-const char* topic_state = "retropixel/state";         // Reportar estado a HA
-const char* topic_cmd_power = "retropixel/cmd/power";  // Encender / Apagar el Switch
-const char* topic_state_power = "retropixel/state/power";  // Reportar estado del switch
-const char* topic_cmd_text = "retropixel/cmd/text";   // Recibir nuevo mensaje
-const char* topic_state_text = "retropixel/state/text"; // Reportar mensaje actual a HA
-const char* topic_cmd_clock_style = "retropixel/cmd/clock_style"; // Recibir estilo del reloj
-const char* topic_state_clock_style = "retropixel/state/clock_style"; //Reportar estilo del reloj
-const char* topic_cmd_clock_color = "retropixel/cmd/clock_color"; // Recibir color del reloj
-const char* topic_state_clock_color = "retropixel/state/clock_color"; //Reportar color del reloj
-const char* topic_cmd_text_color = "retropixel/cmd/text_color"; // Recibir color del texto
-const char* topic_state_text_color = "retropixel/state/text_color"; //Reportar color del texto
+// Topics (Topics)
+const char* topic_cmd_mode = "retropixel/cmd/mode";   // Change mode
+const char* topic_cmd_bright = "retropixel/cmd/bright"; // Change brightness
+const char* topic_state = "retropixel/state";         // Report state to HA
+const char* topic_cmd_power = "retropixel/cmd/power";  // Turn the switch on/off
+const char* topic_state_power = "retropixel/state/power";  // Report switch state
+const char* topic_cmd_text = "retropixel/cmd/text";   // Receive a new message
+const char* topic_state_text = "retropixel/state/text"; // Report current message to HA
+const char* topic_cmd_clock_style = "retropixel/cmd/clock_style"; // Receive clock style
+const char* topic_state_clock_style = "retropixel/state/clock_style"; //Report clock style
+const char* topic_cmd_clock_color = "retropixel/cmd/clock_color"; // Receive clock color
+const char* topic_state_clock_color = "retropixel/state/clock_color"; //Report clock color
+const char* topic_cmd_text_color = "retropixel/cmd/text_color"; // Receive text color
+const char* topic_state_text_color = "retropixel/state/text_color"; //Report text color
 
-// Iconos de clima 8x8 (1 bit por píxel)
+// 8x8 weather icons (1 bit per pixel)
 const unsigned char icon_sun[]    = {0x00, 0x3c, 0x7e, 0x7e, 0x7e, 0x7e, 0x3c, 0x00};
 const unsigned char icon_cloud[]  = {0x00, 0x00, 0x1c, 0x3f, 0x7f, 0x7f, 0x00, 0x00};
 const unsigned char icon_rain[]   = {0x1c, 0x3f, 0x7f, 0x7f, 0x22, 0x44, 0x22, 0x00};
@@ -139,8 +139,8 @@ const unsigned char icon_moon[] = {0x1c, 0x38, 0x70, 0x70, 0x70, 0x38, 0x1c, 0x0
 const unsigned char icon_fog[] = {0x00, 0x3e, 0x00, 0x7f, 0x00, 0x1c, 0x3e, 0x00};
 const unsigned char icon_lightning_rainy[] = {0x3c, 0x7e, 0x18, 0x3c, 0x0c, 0x1e, 0x21, 0x00};
 
-// --- CONFIGURACIÓN RELOJ ---
-// Fuente compacta 5x8 para el Reloj Avanzado
+// --- CLOCK CONFIGURATION ---
+// Compact 5x8 font for the advanced clock
 const uint8_t font5x8[11][5] = {
   {0x3E, 0x51, 0x49, 0x45, 0x3E}, // 0
   {0x00, 0x42, 0x7F, 0x40, 0x00}, // 1
@@ -157,14 +157,14 @@ const uint8_t font5x8[11][5] = {
 
 
 // ====================================================================
-//                          ESTRUCTURA DE DATOS
+//                          DATA STRUCTURE
 // ====================================================================
 
 struct Config {
-    // 1. Controles de Reproducción
+    // 1. Playback controls
     bool powerState;
     int brightness = 150;
-    int playMode = 0; // 0: GIFs, 1: Texto, 2: Reloj, 3: Arcade
+    int playMode = 0; // 0: GIFs, 1: Text, 2: Clock, 3: Arcade
     String slidingText = "Retro Pixel LED v" + String(FIRMWARE_VERSION) + " - IP: " + WiFi.localIP().toString();
     int textSpeed = 50;
     int gifRepeats = 1;
@@ -172,97 +172,97 @@ struct Config {
     std::vector<String> activeFolders; 
     String activeFolders_str = "/GIFS";
     String activePlaylist;
-    // 2. Configuración de Hora/Fecha
+    // 2. Time/Date settings
     String timeZone = TZ_STRING_SPAIN; 
     bool format24h = true;
-    // 3. Configuración del Modo Reloj
+    // 3. Clock mode settings
     int clockEffect;
     uint32_t clockColor = 0x00FF00;
-    bool autoClock;      // Activa/Desactiva el reloj automático
-    int clockInterval;   // Cada cuántos GIFs se muestra el reloj
-    // 4. Configuración del Modo Texto Deslizante
+    bool autoClock;      // Enables/disables the automatic clock
+    int clockInterval;   // How many GIFs play before showing the clock
+    // 4. Scrolling text mode settings
     uint32_t slidingTextColor = 0x00FF00;
-    // 5. Configuración de Hardware/Sistema
-    bool WifiOffMode; // Modo sin Wifi
-    int panelChain = 2; // "Número de Paneles LED (en Cadena)"
+    // 5. Hardware/System settings
+    bool WifiOffMode; // WiFi-free mode
+    int panelChain = 2; // "Number of chained LED panels"
     char device_name[40] = {0};
-    // 6. Configuración MQTT Home Assistant
+    // 6. Configuration MQTT Home Assistant
     bool mqtt_enabled = false;
-    char mqtt_name[40] = "Retro Pixel LED"; // Nombre amigable para HA
+    char mqtt_name[40] = "Retro Pixel LED"; // Friendly name for HA
     char mqtt_host[40] = "192.168.1.100";
     int mqtt_port = 1883;
     char mqtt_user[40] = "";
     char mqtt_pass[40] = "";
-    // 7. Configuración Avanzada de Hardware
-    int minRefreshRate;  // Tasa de refresco
-    int latchBlanking;   // Para el ghosting
+    // 7. Advanced hardware settings
+    int minRefreshRate;  // Refresh rate
+    int latchBlanking;   // For ghosting
     int i2sSpeed;        // 0=8Mhz 1=10Mhz, 2=16Mhz, 3=20Mhz
 };
 Config config;
 
-// Lista de todas las carpetas
+// List of all folders
 std::vector<String> allFolders;
-// Lista de todas las playlist
+// List of all playlists
 std::vector<String> allPlaylists;
 
 // ====================================================================
-//            BUSCADOR DE RUTAS EN EL INDICE DE BATOCERA
+//            BATOCERA INDEX PATH SEARCHER
 // ====================================================================
-String buscarEnCache(String sistema, String juego) {
-    sistema.trim(); sistema.toLowerCase();
-    juego.trim(); juego.toLowerCase();
+String searchCache(String systemName, String gameName) {
+    systemName.trim(); systemName.toLowerCase();
+    gameName.trim(); gameName.toLowerCase();
 
-    // --- NIVEL 1: BUSCAR EL JUEGO (00) ---
-    Serial.printf(">> Nivel 1: Buscando JUEGO [%s] -> [%s]\n", sistema.c_str(), juego.c_str());
-    String rutaEncontrada = ejecutarBusqueda(sistema, juego, "00");
+    // --- LEVEL 1: SEARCH FOR THE GAME (00) ---
+    Serial.printf(">> Level 1: Searching GAME [%s] -> [%s]\n", systemName.c_str(), gameName.c_str());
+    String foundPath = runSearch(systemName, gameName, "00");
     
-    if (rutaEncontrada != "") {
-        Serial.print(">> MATCH JUEGO: "); Serial.println(rutaEncontrada);
-        // Si hay juego, buscamos si tiene variantes (_1, _2...) y devolvemos una
-        return seleccionarVarianteAleatoria(rutaEncontrada);
+    if (foundPath != "") {
+        Serial.print(">> GAME MATCH: "); Serial.println(foundPath);
+        // If there is a game match, look for variants (_1, _2...) and return one
+        return selectRandomVariant(foundPath);
     }
 
-    // --- NIVEL 2: SI NO HAY JUEGO, BUSCAR LOGO DEL SISTEMA (01) ---
-    Serial.printf(">> Nivel 2: Juego no encontrado. Buscando LOGO de [%s]\n", sistema.c_str());
-    rutaEncontrada = ejecutarBusqueda(sistema, "default", "01"); // Reutilizamos la variable
+    // --- LEVEL 2: IF THERE IS NO GAME MATCH, SEARCH FOR THE SYSTEM LOGO (01) ---
+    Serial.printf(">> Level 2: Game not found. Searching LOGO for [%s]\n", systemName.c_str());
+    foundPath = runSearch(systemName, "default", "01"); // Reuse the variable
     
-    if (rutaEncontrada != "") {
-        Serial.print(">> MATCH LOGO: "); Serial.println(rutaEncontrada);
-        return rutaEncontrada;
+    if (foundPath != "") {
+        Serial.print(">> MATCH LOGO: "); Serial.println(foundPath);
+        return foundPath;
     }
 
-    // --- NIVEL 3: GIF POR DEFECTO TOTAL ---
-    Serial.println(">> Nivel 3: Sin match en caché. Cargando default absoluto.");
+    // --- LEVEL 3: FULL DEFAULT GIF ---
+    Serial.println(">> Level 3: No cache match. Loading absolute default.");
     return "/batocera/default/_default.gif";
 }
 
-// Función interna para no repetir código de lectura de archivos
-String ejecutarBusqueda(String sistema, String juego, String prefijo) {
-    String resultado = "";
+// Internal function to avoid repeating file-reading code
+String runSearch(String systemName, String gameName, String prefix) {
+    String result = "";
     if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(2000))) {
         File cache = SD.open("/batocera_cache.txt");
         if (cache) {
             while (cache.available()) {
-                String linea = cache.readStringUntil('\n');
-                linea.trim();
+                String line = cache.readStringUntil('\n');
+                line.trim();
                 
-                // Optimizamos: si no empieza por el prefijo (00 o 01), saltamos
-                if (!linea.startsWith(prefijo)) continue;
+                // Optimize: skip lines that do not start with the prefix (00 or 01)
+                if (!line.startsWith(prefix)) continue;
 
-                int p1 = linea.indexOf('|');
-                int p2 = linea.indexOf('|', p1 + 1);
-                int p3 = linea.lastIndexOf('|');
+                int p1 = line.indexOf('|');
+                int p2 = line.indexOf('|', p1 + 1);
+                int p3 = line.lastIndexOf('|');
 
                 if (p1 != -1 && p2 != -1 && p3 != -1) {
-                    String sistCache = linea.substring(p1 + 1, p2);
-                    String juegoCache = linea.substring(p2 + 1, p3);
+                    String cachedSystem = line.substring(p1 + 1, p2);
+                    String cachedGame = line.substring(p2 + 1, p3);
                     
-                    sistCache.trim(); sistCache.toLowerCase();
-                    juegoCache.trim(); juegoCache.toLowerCase();
+                    cachedSystem.trim(); cachedSystem.toLowerCase();
+                    cachedGame.trim(); cachedGame.toLowerCase();
 
-                    if (sistCache == sistema && juegoCache == juego) {
-                        resultado = linea.substring(p3 + 1);
-                        resultado.trim();
+                    if (cachedSystem == systemName && cachedGame == gameName) {
+                        result = line.substring(p3 + 1);
+                        result.trim();
                         break; 
                     }
                 }
@@ -271,42 +271,42 @@ String ejecutarBusqueda(String sistema, String juego, String prefijo) {
         }
         xSemaphoreGive(sdMutex);
     }
-    return resultado;
+    return result;
 }
 
-String seleccionarVarianteAleatoria(String rutaOriginal) {
-    // 1. Separamos la extensión .gif
-    int punto = rutaOriginal.lastIndexOf('.');
-    String base = rutaOriginal.substring(0, punto); // Ej: /batocera/neogeo/mslug
-    String ext = rutaOriginal.substring(punto);     // Ej: .gif
+String selectRandomVariant(String originalPath) {
+    // 1. Split the extension .gif
+    int dotIndex = originalPath.lastIndexOf('.');
+    String base = originalPath.substring(0, dotIndex); // e.g.: /batocera/neogeo/mslug
+    String ext = originalPath.substring(dotIndex);     // e.g.: .gif
 
-    // 2. Contamos cuántas variantes existen
-    int totalVariantes = 0;
+    // 2. Count how many variants exist
+    int totalVariants = 0;
     
-    // Comprobamos mslug_1.gif, mslug_2.gif... hasta un máximo de 5
+    // Check mslug_1.gif, mslug_2.gif... up to a maximum of 5
     for (int i = 1; i <= 5; i++) {
         String testPath = base + "_" + String(i) + ext;
         if (SD.exists(testPath)) {
-            totalVariantes = i;
+            totalVariants = i;
         } else {
-            break; // Si no existe el _2, dejamos de buscar
+            break; // If _2 does not exist, stop searching
         }
     }
 
-    // 3. Si no hay variantes, devolvemos la original
-    if (totalVariantes == 0) return rutaOriginal;
+    // 3. If there are no variants, return the original
+    if (totalVariants == 0) return originalPath;
 
-    // 4. Si hay variantes, elegimos una al azar (incluyendo la original como opción 0)
-    int eleccion = random(0, totalVariantes + 1); // Random entre 0 y totalVariantes
+    // 4. If variants exist, choose one randomly, including the original as option 0
+    int choice = random(0, totalVariants + 1); // Random between 0 and totalVariants
     
-    if (eleccion == 0) return rutaOriginal;
+    if (choice == 0) return originalPath;
     
-    String rutaElegida = base + "_" + String(eleccion) + ext;
-    Serial.printf(">> Variante detectada! Elegida la numero %d: %s\n", eleccion, rutaElegida.c_str());
-    return rutaElegida;
+    String selectedPath = base + "_" + String(choice) + ext;
+    Serial.printf(">> Variant detected! Selected number %d: %s\n", choice, selectedPath.c_str());
+    return selectedPath;
 }
 
-// Declaraciones de funciones
+// Function declarations
 void handleRoot();
 void handleSave();
 void handleConfig();
@@ -318,7 +318,7 @@ void handleOTAUpload();
 void notFound();
 void syncMQTTState();
 
-// NUEVAS DECLARACIONES PARA GESTIÓN DE ARCHIVOS
+// NEW DECLARATIONS FOR FILE MANAGEMENT
 void handleFileManager();
 void handleFileUpload();
 void handleFileDelete();
@@ -329,24 +329,24 @@ void savePlaybackConfig();
 void saveSystemConfig();
 void initTime();
 
-// Funciones de visualización y control de modos
-void mostrarMensaje(const char* mensaje, uint16_t color);
-void listarArchivosGif();
-void ejecutarModoGif();
-void ejecutarModoTexto();
-void ejecutarModoReloj();
+// Display and mode control functions
+void showMessage(const char* messageText, uint16_t color);
+void listGifFiles();
+void runGifMode();
+void runTextMode();
+void runClockMode();
 void scanFolders();
 // ====================================================================
-//                      MANEJO DE CONFIGURACIÓN (PREFERENCES)
+//                      CONFIGURATION HANDLING (PREFERENCES)
 // ====================================================================
 
 void loadConfig() { 
     preferences.begin(PREF_NAMESPACE, true);
 
     config.powerState = preferences.getBool("powerState", true);
-    config.brightness = preferences.getInt("brightness", 40); // Aplicamos un 15% de brillo por defecto
+    config.brightness = preferences.getInt("brightness", 40); // Apply 15% default brightness
     config.playMode = preferences.getInt("playMode", 1);
-    config.activePlaylist = preferences.getString("actPlaylist", "auto"); // "auto" será el valor por defecto
+    config.activePlaylist = preferences.getString("actPlaylist", "auto"); // "auto" is the default value
     config.slidingText = preferences.getString("slidingText", config.slidingText);
     config.textSpeed = preferences.getInt("textSpeed", 50);
     config.gifRepeats = preferences.getInt("gifRepeats", 1);
@@ -359,14 +359,14 @@ void loadConfig() {
     config.slidingTextColor = preferences.getULong("slideColor", 0x00FF00);
     config.WifiOffMode = preferences.getBool("WifiOffMode", false);
     config.panelChain = preferences.getInt("panelChain", 2);
-    config.autoClock = preferences.getBool("autoClock", false); // Por defecto desactivado
-    config.clockInterval = preferences.getInt("clockInterval", 5); // Por defecto cada 5
-    // Carga de ajustes avanzados ---
-    // Por defecto 90Hz, Blanking 1, Velocidad 1 (10MHz)
+    config.autoClock = preferences.getBool("autoClock", false); // Default desactivado
+    config.clockInterval = preferences.getInt("clockInterval", 5); // Default every 5
+    // Load advanced settings ---
+    // Default 90Hz, Blanking 1, Speed 1 (10MHz)
     config.minRefreshRate = preferences.getInt("minRefresh", 120);
     config.latchBlanking = preferences.getInt("latchBlank", 1);
     config.i2sSpeed = preferences.getInt("i2sSpeed", 2);
-    // Configuración MQTT
+    // Configuration MQTT
     strncpy(config.mqtt_name, mName.c_str(), sizeof(config.mqtt_name));
     String mHost = preferences.getString("m_host", "192.168.1.100");
     strncpy(config.mqtt_host, mHost.c_str(), sizeof(config.mqtt_host));
@@ -376,7 +376,7 @@ void loadConfig() {
     String mPass = preferences.getString("m_pass", "");
     strncpy(config.mqtt_pass, mPass.c_str(), sizeof(config.mqtt_pass));
     
-    // device_name: Lectura especial para char array
+    // device_name: Special read for char array
     String nameStr = preferences.getString("deviceName", DEVICE_NAME_DEFAULT);
     strncpy(config.device_name, nameStr.c_str(), sizeof(config.device_name) - 1);
     config.device_name[sizeof(config.device_name) - 1] = '\0';
@@ -390,7 +390,7 @@ void loadConfig() {
         start = end + 1;
         end = config.activeFolders_str.indexOf(',', start);
     }
-    // Añadir el último elemento (o el único si no hay comas)
+    // Add the last item, or the only one if there are no commas
     if (start < config.activeFolders_str.length()) {
         config.activeFolders.push_back(config.activeFolders_str.substring(start));
     }
@@ -399,7 +399,7 @@ void loadConfig() {
 }
 
 void savePlaybackConfig() { 
-    preferences.begin(PREF_NAMESPACE, false);// modo escritura
+    preferences.begin(PREF_NAMESPACE, false);// write mode
 
     preferences.putBool("powerState", config.powerState);
     preferences.putInt("brightness", config.brightness);
@@ -412,7 +412,7 @@ void savePlaybackConfig() {
     preferences.putInt("clockInterval", config.clockInterval);
     preferences.putString("actPlaylist", config.activePlaylist);
     
-    // Guardar carpetas (serializando de vector a String)
+    // Save folders (serializing from vector to String)
     String foldersToSave;
     for (size_t i = 0; i < config.activeFolders.size(); ++i) {
         foldersToSave += config.activeFolders[i];
@@ -427,7 +427,7 @@ void savePlaybackConfig() {
 }
 
 void saveSystemConfig() { 
-    preferences.begin(PREF_NAMESPACE, false); // 'false' es para modo escritura
+    preferences.begin(PREF_NAMESPACE, false); // 'false' means write mode
     
     preferences.putBool("powerState", config.powerState);
     preferences.putString("timeZone", config.timeZone);
@@ -439,11 +439,11 @@ void saveSystemConfig() {
     preferences.putInt("panelChain", config.panelChain);
     preferences.putBool("WifiOffMode", config.WifiOffMode);
     preferences.putString("deviceName", config.device_name);
-    // Ajustes avanzados
+    // Advanced settings
     preferences.putInt("minRefresh", config.minRefreshRate);
     preferences.putInt("latchBlank", config.latchBlanking);
     preferences.putInt("i2sSpeed", config.i2sSpeed);
-    // Configuración MQTT
+    // Configuration MQTT
     preferences.putBool("mqtt_en", config.mqtt_enabled);
     preferences.putString("m_name", config.mqtt_name);
     preferences.putString("m_host", config.mqtt_host);
@@ -456,37 +456,37 @@ void saveSystemConfig() {
 }
 
 // ====================================================================
-//                      FUNCIÓN CRÍTICA DE REINICIO
+//                      CRITICAL RESTART FUNCTION
 // ====================================================================
 
 void handleFactoryReset() {
     preferences.begin(PREF_NAMESPACE, false);
-    preferences.clear(); // Borra todas las configuraciones guardadas
+    preferences.clear(); // Deletes all saved settings
     preferences.end();
     
     wm.resetSettings();
-// Borra la configuración WiFi
+// Deletes WiFi configuration
     
-    server.send(200, "text/html", "<h2>Restablecimiento Completo</h2><p>Todos los ajustes (incluida la conexión WiFi) han sido borrados. El dispositivo se reiniciará en 3 segundos e iniciará el Portal Cautivo.</p>");
+    server.send(200, "text/html", "<h2>Full Reset</h2><p>All settings, including the WiFi connection, have been deleted. The device will restart in 3 seconds and start the captive portal.</p>");
     delay(3000);
     ESP.restart();
 }
 
 
 // ====================================================================
-//                      FUNCIÓN CRÍTICA DE TIEMPO
+//                      CRITICAL TIME FUNCTION
 // ====================================================================
 void initTime() {
     const char* tz_to_use = TZ_STRING_SPAIN;
     if (!config.timeZone.isEmpty() && config.timeZone.length() >= 4) {
         tz_to_use = config.timeZone.c_str();
     } else {
-        Serial.println("ADVERTENCIA: Zona horaria vacía/inválida. Usando valor por defecto seguro.");
+        Serial.println("WARNING: Empty/invalid time zone. Using safe default value.");
     }
     
     configTzTime(tz_to_use, ntpServer); 
     
-    Serial.printf("Configurando NTP con servidor: %s, Zona Horaria: %s\n", ntpServer, tz_to_use);
+    Serial.printf("Configuring NTP with server: %s, Time Zone: %s\n", ntpServer, tz_to_use);
     time_t now = time(nullptr);
     int attempts = 0;
     while (now < 10000 && attempts < 10) {
@@ -502,33 +502,33 @@ void initTime() {
 //                      MANEJADORES HTTP Y WEB
 // ====================================================================
 
-// --- Utilidad para conversión de color HEX a uint32_t ---
+// --- Utility to convert HEX color to uint32_t ---
 uint32_t parseHexColor(String hex) {
     if (hex.startsWith("#")) hex.remove(0, 1);
-// Usar 0x00FF00 (Verde) como valor por defecto si la longitud es incorrecta
+// Use 0x00FF00 (green) as the default value if the length is invalid
     if (hex.length() != 6) return 0x00FF00;
     return strtoul(hex.c_str(), NULL, 16);
 }
 
-// --- Rutas del Servidor ---
+// --- Server routes ---
 
 void handlePower() {
-    // 1. Invertimos el estado actual
+    // 1. Invert current state
     config.powerState = !config.powerState;
     
-    // 2. Guardamos en la memoria Flash (powerState se guarda en saveSystemConfig)
+    // 2. Save to flash memory (powerState is saved in saveSystemConfig)
     saveSystemConfig();
     
-    // 3. Avisamos a Home Assistant del nuevo estado
+    // 3. Notify Home Assistant of the new state
     syncMQTTState();
     
-    // 4. Redirigimos de vuelta a la página principal
+    // 4. Redirect back to the main page
     server.sendHeader("Location", "/");
     server.send(302, "text/plain", "OK");
 }
 
 void handleSave() { 
-    // 1. Recogida de argumentos existentes
+    // 1. Read existing arguments
     int tempBrightness = server.hasArg("b") ? server.arg("b").toInt() : config.brightness;
     int tempPlayMode = server.hasArg("pm") ? server.arg("pm").toInt() : config.playMode;
     String tempSlidingText = server.hasArg("st") ? server.arg("st") : config.slidingText;
@@ -536,14 +536,14 @@ void handleSave() {
     int tempGifRepeats = server.hasArg("r") ? server.arg("r").toInt() : config.gifRepeats;
     bool tempRandomMode = server.hasArg("m") ? (server.arg("m").toInt() == 1) : config.randomMode;
     
-    // --- Recogida de Playlist con Interrupción ---
+    // --- Playlist parsing with interruption ---
     bool cambioPlaylist = false;
     if (server.hasArg("pl")) {
-        String nuevaLista = server.arg("pl");
-        if (config.activePlaylist != nuevaLista) {
-            config.activePlaylist = nuevaLista;
-            interrumpirReproduccion = true; // Activa la detención inmediata
-            gifCachePosition = 0;           // Reinicia el contador para la nueva lista
+        String newList = server.arg("pl");
+        if (config.activePlaylist != newList) {
+            config.activePlaylist = newList;
+            interruptPlayback = true; // Enables immediate stop
+            gifCachePosition = 0;           // Resets the counter for the new list
             cambioPlaylist = true;
         }
     }
@@ -552,17 +552,17 @@ void handleSave() {
     if (server.hasArg("cc")) config.clockColor = parseHexColor(server.arg("cc"));
     if (server.hasArg("stc")) config.slidingTextColor = parseHexColor(server.arg("stc"));
 
-    // --- Recogida de Auto Reloj ---
-    // Si el checkbox "ac" está presente, es que se ha marcado (true)
+    // --- Auto Clock parsing ---
+    // If checkbox "ac" is present, it was checked (true)
     config.autoClock = server.hasArg("ac"); 
     
-    // Si viene el intervalo "ci", lo guardamos
+    // If the "ci" interval is present, store it
     if (server.hasArg("ci")) {
         config.clockInterval = server.arg("ci").toInt();
         if (config.clockInterval < 1) config.clockInterval = 1; // Seguridad
     }
 
-    // 2. Gestión de Carpetas Temporal
+    // 2. Temporary folder management
     std::vector<String> tempFolders;
     for(size_t i = 0; i < server.args(); ++i) {
         if (server.argName(i) == "f") {
@@ -570,11 +570,11 @@ void handleSave() {
         }
     }
 
-    if (tempFolders.empty() && sdMontada) {
+    if (tempFolders.empty() && sdMounted) {
          tempFolders.push_back("/");
     }
 
-    // 3. Actualizar configuración en RAM
+    // 3. Update configuration in RAM
     config.brightness = tempBrightness;
     config.playMode = tempPlayMode;
     config.slidingText = tempSlidingText;
@@ -585,44 +585,44 @@ void handleSave() {
 
     if (display) display->setBrightness8(config.brightness);
 
-    // 4. Gestión del escaneo
+    // 4. Scan management
     if (config.playMode == 0) {
-        // Solo programamos escaneo de carpetas si NO estamos usando una playlist
+        // Only schedule folder scanning when no playlist is being used
         if (config.activePlaylist == "auto") {
-            recargarGifsPendiente = true; 
-            Serial.println(">> Escaneo de carpetas programado...");
+            pendingGifReload = true; 
+            Serial.println(">> Folder scan scheduled...");
         } else {
-            recargarGifsPendiente = false;
-            // Opcional: llamar a una función que cuente las líneas de la playlist seleccionada para actualizar config.totalGifsInPlaylist
-            Serial.println(">> Usando Playlist: " + config.activePlaylist);
+            pendingGifReload = false;
+            // Optional: call a function that counts the selected playlist lines to update config.totalGifsInPlaylist
+            Serial.println(">> Using Playlist: " + config.activePlaylist);
         }
         
-        contadorGifsReproducidos = 0;
-        modoRelojTemporalActivo = false;
+        playedGifCount = 0;
+        temporaryClockModeActive = false;
     }
 
-    // 5. Guardar en Flash
-    savePlaybackConfig(); // Asegúrate de que esta función guarde autoClock y clockInterval en NVS
+    // 5. Save to Flash
+    savePlaybackConfig(); // Make sure this function stores autoClock and clockInterval in NVS
 
-    // 5.1 Liberar interrupción si hubo cambio
+    // 5.1 Release interruption if there was a change
     if (cambioPlaylist) {
-        delay(100); // Pequeña pausa para asegurar que el Core 1 recibe la señal
-        interrumpirReproduccion = false; 
+        delay(100); // Small pause to make sure Core 1 receives the signal
+        interruptPlayback = false; 
     }
 
     // 6. Respuesta Web
     server.sendHeader("Location", "/");
-    server.send(302, "text/plain", "Guardado");
+    server.send(302, "text/plain", "Saved");
 
-    // 7. Sincronizar con Home Assistant
+    // 7. Synchronize with Home Assistant
     syncMQTTState();
 }
 
 void handleSaveConfig() { 
-    // 1. Reseteamos el timeout del portal para darnos margen
+    // 1. Reset the portal timeout to give us margin
     wm.setConfigPortalTimeout(180); 
 
-    // 2. Configuración de Sistema y Hardware
+    // 2. System and hardware settings
     if (server.hasArg("deviceName")) { 
         String nameStr = server.arg("deviceName");
         strncpy(config.device_name, nameStr.c_str(), sizeof(config.device_name) - 1);
@@ -630,12 +630,12 @@ void handleSaveConfig() {
     }
     if (server.hasArg("pc")) config.panelChain = server.arg("pc").toInt();
 
-    // Ajustes avanzados ---
+    // Advanced settings ---
     if (server.hasArg("i2s")) config.i2sSpeed = server.arg("i2s").toInt();
     if (server.hasArg("mrr")) config.minRefreshRate = server.arg("mrr").toInt();
     if (server.hasArg("lb"))  config.latchBlanking = server.arg("lb").toInt();
 
-    // 3. Configuración de Reloj y Wifi (Modo Online/Offline)
+    // 3. Clock and WiFi settings (Mode Online/Offline)
     if (server.hasArg("wifiOffMode")) {
         config.WifiOffMode = (server.arg("wifiOffMode") == "1");
     }
@@ -645,15 +645,15 @@ void handleSaveConfig() {
         config.clockEffect = server.arg("clockEffect").toInt();
     }
 
-    // 4. Colores y Texto
+    // 4. Colors and text
     if (server.hasArg("cc")) config.clockColor = parseHexColor(server.arg("cc"));
     if (server.hasArg("stc")) config.slidingTextColor = parseHexColor(server.arg("stc"));
     if (server.hasArg("st")) { 
         config.slidingText = server.arg("st"); 
-        xPosMarquesina = display->width();
+        marqueeXPos = display->width();
     }
 
-    // 5. Configuración MQTT
+    // 5. Configuration MQTT
     config.mqtt_enabled = server.hasArg("mqtt_en");
     if (server.hasArg("m_name")) strncpy(config.mqtt_name, server.arg("m_name").c_str(), sizeof(config.mqtt_name) - 1);
     if (server.hasArg("m_host")) strncpy(config.mqtt_host, server.arg("m_host").c_str(), sizeof(config.mqtt_host) - 1);
@@ -661,23 +661,23 @@ void handleSaveConfig() {
     if (server.hasArg("m_user")) strncpy(config.mqtt_user, server.arg("m_user").c_str(), sizeof(config.mqtt_user) - 1);
     if (server.hasArg("m_pass")) strncpy(config.mqtt_pass, server.arg("m_pass").c_str(), sizeof(config.mqtt_pass) - 1);
 
-    // 6. Guardar en FLASH
+    // 6. Save to FLASH
     saveSystemConfig();
     
-    // 7. Sincronización MQTT 
-    // Solo si NO estamos en Offline, si MQTT está habilitado y si hay conexión real
+    // 7. MQTT synchronization 
+    // Only when not offline, MQTT is enabled, and there is a real connection
     if (!config.WifiOffMode && config.mqtt_enabled && mqttClient.connected()) {
         String technicalID = "retropixel_" + chipID;
         mqttClient.publish(("retropixel/" + technicalID + "/state/text").c_str(), config.slidingText.c_str(), true);
         syncMQTTState();
-        // Nota: No desconectamos para que el panel siga reportando mientras no reiniciemos
+        // Note: Do not disconnect so the panel keeps reporting until restart
     }
 
-    // 8. Respuesta al navegador (Redirección 302)
+    // 8. Browser response (302 redirect)
     server.sendHeader("Location", "/config");
-    server.send(302, "text/plain", "Configuracion Guardada");
+    server.send(302, "text/plain", "Configuration Saved");
 
-    Serial.println(">> Configuración guardada y MQTT condicionado aplicado.");
+    Serial.println(">> Configuration saved y MQTT condicionado aplicado.");
 }
 
 // ====================================================================
@@ -692,7 +692,7 @@ String getStyle() {
     s += "h2 { font-size: 15px; color: #00f2ff; border-bottom: 1px solid rgba(0, 242, 255, 0.3); padding-bottom: 8px; margin-top: 10px; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 1px; }";
     s += ".card { background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); padding: 20px; border-radius: 20px; margin-bottom: 20px; box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5); }";
     
-    /* --- SLIDER BRILLO AZUL NEÓN --- */
+    /* --- NEON BLUE BRIGHTNESS SLIDER --- */
     s += "input[type=range] { width: 100%; -webkit-appearance: none; background: transparent; margin: 15px 0; }";
     s += "input[type=range]::-webkit-slider-runnable-track { width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; }";
     s += "input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 22px; width: 22px; border-radius: 50%; background: #00f2ff; margin-top: -8px; box-shadow: 0 0 15px #00f2ff, 0 0 5px #fff; border: 2px solid #fff; cursor: pointer; }";
@@ -705,7 +705,7 @@ String getStyle() {
     s += ".cb label { font-weight: normal; text-transform: none; color: #ccc; display: flex; align-items: center; gap: 10px; margin: 10px 0; font-size: 13px; cursor: pointer; }";
     s += ".cb input[type='checkbox'] { width: 18px; height: 18px; accent-color: #00f2ff; cursor: pointer; }";
 
-    /* --- DISEÑO DE COLORES --- */
+    /* --- COLOR DESIGN --- */
     s += ".dual-neon { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px; }";
     s += ".color-card { background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); padding: 15px; border-radius: 15px; text-align: center; transition: all 0.3s; }";
     s += ".color-card:hover { border-color: rgba(0, 242, 255, 0.5); background: rgba(0, 242, 255, 0.05); }";
@@ -718,10 +718,10 @@ String getStyle() {
     s += ".grid-2, .dual-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }";
     s += ".grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-top: 10px; }";
     
-    /* BOTONES NEÓN */
+    /* NEON BUTTONS */
     s += ".btn { display: flex; align-items: center; justify-content: center; width: 100%; padding: 15px; border-radius: 12px; font-weight: bold; text-align: center; border: none; font-size: 10px; cursor: pointer; text-transform: uppercase; transition: 0.3s; text-decoration: none; min-height: 45px; }";
     s += ".save-btn { background: linear-gradient(45deg, #00b09b, #96c93d); color: #fff; box-shadow: 0 4px 15px rgba(0, 176, 155, 0.4); font-size: 13px; }";
-    s += ".btn-ajustes, .btn-volver, .back-btn { background: linear-gradient(45deg, #f39c12, #ff512f); color: #fff; box-shadow: 0 4px 15px rgba(243, 156, 18, 0.4); }";
+    s += ".settings-btn, .return-btn, .back-btn { background: linear-gradient(45deg, #f39c12, #ff512f); color: #fff; box-shadow: 0 4px 15px rgba(243, 156, 18, 0.4); }";
     s += ".btn-files { background: linear-gradient(45deg, #9b59b6, #da22ff); color: #fff; box-shadow: 0 4px 15px rgba(155, 89, 182, 0.4); }";
     s += ".btn-ota, .btn-reset, .restart-btn { background: linear-gradient(45deg, #3498db, #0575E6); color: #fff; box-shadow: 0 4px 15px rgba(52, 152, 219, 0.4); }";
     s += ".reset-btn { background: linear-gradient(45deg, #e74c3c, #8e0e00); color: #fff; box-shadow: 0 4px 15px rgba(231, 76, 60, 0.4); margin-top: 20px; }";
@@ -736,63 +736,63 @@ String getStyle() {
 
 void handleRoot() {
     
-    enModoGestion = false; // Al entrar al inicio, liberamos el panel para que muestre GIFs
+    inFileManagerMode = false; // When entering the home page, release the panel so it can show GIFs
 
-    // 1. Aseguramos rendimiento máximo al cargar la web
+    // 1. Ensure maximum performance while loading the web UI
     if (getCpuFrequencyMhz() < 240) setCpuFrequencyMhz(240);
 
-    // Escaneamos la carpeta de playlists para tener los nombres actualizados
+    // Scan the playlists folder to keep names up to date
     scanPlaylists();
 
-    // 2. Avisamos al navegador que enviaremos por trozos (Chunked)
+    // 2. Tell the browser we will send chunks
     server.setContentLength(CONTENT_LENGTH_UNKNOWN);
-    server.send(200, "text/html", ""); // Envía solo las cabeceras
+    server.send(200, "text/html", ""); // Send headers only
 
     // --- VARIABLES ---
     char hexColor[8]; sprintf(hexColor, "#%06X", config.clockColor);
     char hexTextColor[8]; sprintf(hexTextColor, "#%06X", config.slidingTextColor); 
     int brightnessPercent = (int)(((float)config.brightness / 255.0) * 100.0);
 
-    // --- TROZO 1: CABECERA Y ESTILOS ---
+    // --- CHUNK 1: CABECERA Y ESTILOS ---
     String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'>";
     html += "<meta name='viewport' content='width=device-width,initial-scale=1,user-scalable=no'>";
     html += "<title>Retro Pixel LED</title><link rel='stylesheet' href='/style.css?v=3'></head><body><div class='c'>";
     html += "<h1>Retro Pixel <span style='font-weight:200'>LED</span></h1>";
-    server.sendContent(html); // Enviamos el primer trozo y liberamos memoria
+    server.sendContent(html); // Send the first chunk and free memory
 
-    // --- TROZO 2: ESTADO DEL PANEL ---
-    html = "<div class='card'><h3>Estado del Panel</h3>";
+    // --- CHUNK 2: PANEL STATE ---
+    html = "<div class='card'><h3>Panel State</h3>";
     if (config.powerState) 
-        html += "<a href='/power' class='btn' style='background:rgba(211,47,47,0.1); border:1px solid #ff2e63; color:#ff2e63; box-shadow: 0 0 15px rgba(255,46,99,0.2);'>APAGAR MATRIZ LED</a>";
+        html += "<a href='/power' class='btn' style='background:rgba(211,47,47,0.1); border:1px solid #ff2e63; color:#ff2e63; box-shadow: 0 0 15px rgba(255,46,99,0.2);'>TURN LED MATRIX OFF</a>";
     else 
-        html += "<a href='/power' class='btn' style='background:rgba(56,142,60,0.1); border:1px solid #08d9d6; color:#08d9d6; box-shadow: 0 0 15px rgba(8,217,214,0.2);'>ENCENDER MATRIZ LED</a>";
+        html += "<a href='/power' class='btn' style='background:rgba(56,142,60,0.1); border:1px solid #08d9d6; color:#08d9d6; box-shadow: 0 0 15px rgba(8,217,214,0.2);'>TURN LED MATRIX ON</a>";
     html += "</div><form action='/save' method='POST'>";
     server.sendContent(html);
 
-    // --- TROZO 3: BRILLO Y MODO ---
-    html = "<div class='card'><h3>Brillo <span id='brightnessValue' style='color:#00f2ff; float:right;'>" + String(brightnessPercent) + "%</span></h3>";
+    // --- CHUNK 3: BRIGHTNESS AND MODE ---
+    html = "<div class='card'><h3>Brightness <span id='brightnessValue' style='color:#00f2ff; float:right;'>" + String(brightnessPercent) + "%</span></h3>";
     html += "<input type='range' name='b' min='0' max='255' value='" + String(config.brightness) + "' oninput='updateBrightness(this.value)'></div>";
     
-    html += "<div class='card'><h3>Modo de Reproducción</h3>";
+    html += "<div class='card'><h3>Playback Mode</h3>";
     html += "<select name='pm' id='playModeSelect'>";
-    html += String("<option value='0'") + (config.playMode == 0 ? " selected" : "") + ">📁 Galería de GIFs</option>";
-    html += String("<option value='1'") + (config.playMode == 1 ? " selected" : "") + ">📝 Texto Deslizante</option>";
-    html += String("<option value='2'") + (config.playMode == 2 ? " selected" : "") + ">🕒 Reloj Digital</option>";
+    html += String("<option value='0'") + (config.playMode == 0 ? " selected" : "") + ">📁 GIF Gallery</option>";
+    html += String("<option value='1'") + (config.playMode == 1 ? " selected" : "") + ">📝 Scrolling Text</option>";
+    html += String("<option value='2'") + (config.playMode == 2 ? " selected" : "") + ">🕒 Clock Digital</option>";
     html += String("<option value='3'") + (config.playMode == 3 ? " selected" : "") + ">🕹️ Arcade</option></select></div>";
     server.sendContent(html);
 
-    // --- TROZO 4: CONFIGURACIÓN GIF ---
+    // --- CHUNK 4: GIF CONFIGURATION ---
     html = "<div id='gifConfig' style='display:" + String(config.playMode == 0 ? "block" : "none") + ";'>";
-    html += "<div class='card'><h3>Ajustes de Galería</h3>";
+    html += "<div class='card'><h3>Gallery Settings</h3>";
     
-    // Reloj Automático
+    // Automatic Clock
     html += "<div style='display:flex; align-items:center; justify-content:space-between; background:rgba(0,242,255,0.05); padding:10px; border-radius:8px; margin-bottom:15px; border:1px solid rgba(0,242,255,0.1);'>";
     html += "  <label style='display:flex; align-items:center; cursor:pointer; font-size:13px; margin:0;'>";
     html += "    <input type='checkbox' name='ac' onchange='toggleAutoClock(this.checked)' " + String(config.autoClock ? "checked" : "") + " style='margin-right:8px;'>";
-    html += "   🕒 Mostar Reloj";
+    html += "   🕒 Mostar Clock";
     html += "  </label>";
     html += "  <div id='autoClockSettings' style='display:" + String(config.autoClock ? "block" : "none") + ";'>";
-    html += "    <span style='font-size:12px; color:#888;'>Cada: </span>";
+    html += "    <span style='font-size:12px; color:#888;'>Every: </span>";
     html += "    <input type='number' name='ci' min='1' max='99' value='" + String(config.clockInterval) + "' style='width:45px; background:#111; border:1px solid #333; color:#00f2ff; text-align:center; border-radius:4px; padding:2px;'>";
     html += "    <span style='font-size:12px; color:#888;'> GIFs</span>";
     html += "  </div>";
@@ -804,28 +804,28 @@ void handleRoot() {
     html += " <div><label>Orden</label><select name='m'><option value='0'" + String(config.randomMode ? "" : " selected") + ">Secuencial</option><option value='1'" + String(config.randomMode ? " selected" : "") + ">Aleatorio</option></select></div>";
     html += "</div>";
     
-    // origen de datos Playlist
+    // Playlist data source
     html += "<div style='margin-top:20px; background:rgba(255,255,255,0.03); padding:12px; border-radius:8px; border:1px solid rgba(255,255,255,0.05);'>";
-    html += " <label style='color:#00f2ff; font-weight:bold; font-size:12px; letter-spacing:1px; text-transform:uppercase;'>Origen de los GIFs</label>";
+    html += " <label style='color:#00f2ff; font-weight:bold; font-size:12px; letter-spacing:1px; text-transform:uppercase;'>GIF Source</label>";
     html += " <select name='pl' id='playlistSelect' style='width:100%; margin-top:8px; background:#111; border:1px solid #333; color:#fff; border-radius:6px; padding:8px;' onchange='toggleFolders(this.value)'>";
     
-    // Opción Auto
+    // Auto option
     String selAuto = (config.activePlaylist == "auto") ? " selected" : "";
-    html += "  <option value='auto'" + selAuto + ">✨ Auto-generar (Usar carpetas)</option>";
+    html += "  <option value='auto'" + selAuto + ">✨ Auto-generate (Use folders)</option>";
     
-    // Listas .txt encontradas
+    // Found .txt lists
     for (const String& p : allPlaylists) {
         String sel = (config.activePlaylist == p) ? " selected" : "";
         html += "  <option value='" + p + "'" + sel + ">📋 Playlist: " + p + "</option>";
     }
     html += " </select></div>";
 
-    // Envolvemos las carpetas en un div para poder ocultarlas si hay playlist
+    // Wrap folders in a div so they can be hidden when a playlist is selected
     html += "<div id='foldersBlock' style='margin-top:20px; display:" + String(config.activePlaylist == "auto" ? "block" : "none") + ";'>";
-    html += "<label>Carpetas en SD</label><div class='cb'>";
-    if (sdMontada) {
+    html += "<label>SD Folders</label><div class='cb'>";
+    if (sdMounted) {
         if (allFolders.empty()) {
-            html += "<p style='color:#888; font-size:11px;'>No hay carpetas en /gifs</p>";
+            html += "<p style='color:#888; font-size:11px;'>There are no folders in /gifs</p>";
         } else {
             for (const String& f : allFolders) {
                 bool isChecked = (std::find(config.activeFolders.begin(), config.activeFolders.end(), f) != config.activeFolders.end());
@@ -833,22 +833,22 @@ void handleRoot() {
             }
         }
     } else {
-        html += "<p style='color:#ff2e63; font-size:11px;'>⚠️ SD NO DETECTADA</p>";
+        html += "<p style='color:#ff2e63; font-size:11px;'>⚠️ SD NOT DETECTED</p>";
     }
     html += "</div></div></div></div>"; // Cerramos foldersBlock y gifConfig
     server.sendContent(html);
 
-    // --- TROZO 5: TEXTO, RELOJ Y FOOTER (Limpiado) ---
+    // --- CHUNK 5: TEXT, CLOCK, AND FOOTER (Cleaned) ---
     html = "<div id='textConfig' style='display:" + String(config.playMode == 1 ? "block" : "none") + ";'>";
-    html += "<div class='card'><h3>Configuración Texto</h3>";
-    html += "<label>Mensaje Personalizado</label><input type='text' name='st' value='" + config.slidingText + "' maxlength='100'>";
+    html += "<div class='card'><h3>Configuration Text</h3>";
+    html += "<label>Custom Message</label><input type='text' name='st' value='" + config.slidingText + "' maxlength='100'>";
     html += "<div class='grid-2' style='align-items: center;'>";
-    html += " <div><label>Velocidad (ms)</label><input type='number' name='ts' min='10' max='1000' value='" + String(config.textSpeed) + "'></div>";
+    html += " <div><label>Speed (ms)</label><input type='number' name='ts' min='10' max='1000' value='" + String(config.textSpeed) + "'></div>";
     html += " <div style='text-align:center;'><label>Color</label><input type='color' name='stc' value='" + String(hexTextColor) + "'></div>";
     html += "</div></div></div>"; 
 
     html += "<div id='clockConfig' style='display:" + String(config.playMode == 2 ? "block" : "none") + ";'>";
-    html += "<div class='card'><h3>Configuración Reloj</h3>";
+    html += "<div class='card'><h3>Configuration Clock</h3>";
     html += "<div class='grid-2' style='align-items: center;'>";
     html += " <div><label>Efecto Visual</label><select name='clockEffect'>";
     const char* effects[] = {"Rainbow Flow", "Static Rainbow", "Solid Neon", "Night Fire", "Pulse Breath", "Matrix Digital", "Color Gradient 50%", "Color Gradient 80%"};
@@ -856,20 +856,20 @@ void handleRoot() {
         html += "<option value='" + String(i) + "'" + (config.clockEffect == i ? " selected" : "") + ">" + effects[i] + "</option>";
     }
     html += " </select></div>";
-    html += " <div style='text-align:center;'><label>Color Base</label><input type='color' name='cc' value='" + String(hexColor) + "'></div>";
+    html += " <div style='text-align:center;'><label>Base Color</label><input type='color' name='cc' value='" + String(hexColor) + "'></div>";
     html += "</div></div></div>"; 
     server.sendContent(html);
 
     // Botones y Footer
-    html = "<button type='submit' class='btn save-btn'>GUARDAR CAMBIOS</button>";
+    html = "<button type='submit' class='btn save-btn'>SAVE CHANGES</button>";
     html += "<div class='grid-3'>";
-    html += " <a href='/config' class='btn btn-ajustes'>AJUSTES</a>";
-    html += " <a href='/file_manager' class='btn btn-files' onclick='return confirm(\"Se detendrá el panel. ¿Continuar?\")'>FILES</a>";
+    html += " <a href='/config' class='btn settings-btn'>SETTINGS</a>";
+    html += " <a href='/file_manager' class='btn btn-files' onclick='return confirm(\"The panel will stop. Continue?\")'>FILES</a>";
     html += " <a href='/ota' class='btn btn-ota'>OTA</a>";
     html += "</div></form>";
     html += "<div class='footer'><span>v" + String(FIRMWARE_VERSION) + " - fjgordillo86</span><span>IP: " + WiFi.localIP().toString() + "</span></div>";
 
-    // --- TROZO 6: JAVASCRIPT ---
+    // --- CHUNK 6: JAVASCRIPT ---
     html += "<script>";
     html += "function toggleFolders(v){ document.getElementById('foldersBlock').style.display = (v=='auto')?'block':'none'; }";
     html += "function updateBrightness(v){ document.getElementById('brightnessValue').innerHTML=Math.round((v/255)*100)+'%'; }";
@@ -885,85 +885,85 @@ void handleRoot() {
     
     server.sendContent(html);
     
-    // 3. Finalizamos el envío
+    // 3. Finish sending
     server.sendContent(""); 
 
 }
 
 // ====================================================================
-//                  INTERFAZ WEB CONFIGURACIÓN
+//                  WEB CONFIGURATION UI
 // ====================================================================
 
 void handleConfig() {
 
-    // 1. Rendimiento máximo y cabeceras Chunked
+    // 1. Maximum performance and chunked headers
     if (getCpuFrequencyMhz() < 240) setCpuFrequencyMhz(240);
     server.setContentLength(CONTENT_LENGTH_UNKNOWN);
     server.send(200, "text/html", "");
 
-    // --- TROZO 1: CABECERA Y WIFI ---
+    // --- CHUNK 1: CABECERA Y WIFI ---
     String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'>";
     html += "<meta name='viewport' content='width=device-width,initial-scale=1,user-scalable=no'>";
-    html += "<title>Configuración</title><link rel='stylesheet' href='/style.css?v=3'></head><body><div class='c'>";
-    html += "<h1>Configuración</h1><form action='/save_config' method='POST'>";
+    html += "<title>Configuration</title><link rel='stylesheet' href='/style.css?v=3'></head><body><div class='c'>";
+    html += "<h1>Configuration</h1><form action='/save_config' method='POST'>";
 
-    html += "<div class='card'><h2>1. WiFi y Reloj</h2>";
-    html += "<label>Modo de Funcionamiento</label><select name='wifiOffMode'>";
-    html += "<option value='0'" + String(!config.WifiOffMode ? " selected" : "") + ">Online (Necesita red WiFi)</option>";
-    html += "<option value='1'" + String(config.WifiOffMode ? " selected" : "") + ">Offline (No necesita red WiFi)</option>";
+    html += "<div class='card'><h2>1. WiFi y Clock</h2>";
+    html += "<label>Operating Mode</label><select name='wifiOffMode'>";
+    html += "<option value='0'" + String(!config.WifiOffMode ? " selected" : "") + ">Online (requires WiFi network)</option>";
+    html += "<option value='1'" + String(config.WifiOffMode ? " selected" : "") + ">Offline (does not require WiFi network)</option>";
     html += "</select>";
     html += "<div class='info-box' style='background: #332200; border-left: 4px solid #ffaa00; padding: 10px; margin-top: 10px;'>";
-    html += "⚠️ <b>Nota:</b> En modo Offline el panel genera su propia red, conéctate a ella para usar Retro Pixel LED. En este modo el reloj no se sincronizará. ";
-    html += "Al cambiar de modo, debes <b>Guardar y Reiniciar</b>.";
-    html += "<i>* Si no se configura una red WiFi en 3 min, se activa el Modo Offline automáticamente.</i></div><br>";
+    html += "⚠️ <b>Note:</b> In Offline mode the panel creates its own network. Connect to it to use Retro Pixel LED. The clock will not synchronize in this mode. ";
+    html += "When changing modes, you must <b>Save and Restart</b>.";
+    html += "<i>* If no WiFi network is configured within 3 minutes, Offline Mode is enabled automatically.</i></div><br>";
 
-    html += "<label>Zona Horaria (TZ String)</label><input type='text' name='tz' value='" + config.timeZone + "'>";
-    html += "<div class='info-box'>Valor por defecto para España: <code>" + String(TZ_STRING_SPAIN) + "</code>. <br>Puedes buscar otras zonas horarias aquí: <a href='https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv' target='_blank' style='color:#00fbff;'>Lista de TZ Strings</a>. La gestión del DST es automática.</div></div>";
+    html += "<label>Time Zone (TZ String)</label><input type='text' name='tz' value='" + config.timeZone + "'>";
+    html += "<div class='info-box'>Default value for Spain: <code>" + String(TZ_STRING_SPAIN) + "</code>. <br>You can search for other time zones here: <a href='https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv' target='_blank' style='color:#00fbff;'>TZ String List</a>. DST is handled automatically.</div></div>";
     server.sendContent(html);
 
-    // --- TROZO 2: HARDWARE ---
+    // --- CHUNK 2: HARDWARE ---
     html = "<div class='card'><h2>2. Hardware & Panel</h2>"; 
-    html += "<label>Número de Paneles (Chain)</label><input type='number' name='pc' min='1' max='8' value='" + String(config.panelChain) + "'>";
+    html += "<label>Number of Panels (Chain)</label><input type='number' name='pc' min='1' max='8' value='" + String(config.panelChain) + "'>";
     html += "<div class='grid-2'>"; 
-    html += "<div><label>Velocidad I2S</label><select name='i2s'>";
+    html += "<div><label>Speed I2S</label><select name='i2s'>";
     const char* speeds[] = {"8 MHz (Seguro)", "10 MHz (Estable)", "16 MHz (Normal)", "20 MHz (Turbo)"};
     for(int i=0; i<4; i++) {
         html += "<option value='" + String(i) + "'" + (config.i2sSpeed == i ? " selected" : "") + ">" + speeds[i] + "</option>";
     }
     html += "</select></div>";
-    html += "<div><label>Refresco Mín. (Hz)</label><input type='number' name='mrr' min='30' max='120' value='" + String(config.minRefreshRate) + "'></div></div>";
+    html += "<div><label>Min. Refresh (Hz)</label><input type='number' name='mrr' min='30' max='120' value='" + String(config.minRefreshRate) + "'></div></div>";
 
     html += "<label style='margin-top:10px;'>Latch Blanking (Anti-Ghosting)</label>";
     html += "<div style='display:flex; gap:10px; align-items:center;'>";
     html += "<input type='range' name='lb' min='1' max='4' step='1' value='" + String(config.latchBlanking) + "' oninput='document.getElementById(\"lbVal\").innerText=this.value'>";
     html += "<span id='lbVal' style='color:#00f2ff; font-weight:bold; font-size:14px; width:20px;'>" + String(config.latchBlanking) + "</span></div>";
-    html += "<div class='info-box'>⚠️ <b>Nota:</b> Subir el 'Latch Blanking' reduce el brillo fantasma. Un refesco muy alto puede desiquilibar la conexión WiFi. <br>Cambiar estos valores requiere <b>Guardar y Reiniciar</b>.</div></div>";
+    html += "<div class='info-box'>⚠️ <b>Note:</b> Increasing Latch Blanking reduces ghost brightness. A very high refresh rate can destabilize the WiFi connection. <br>Changing these values requires <b>Save and Restart</b>.</div></div>";
     server.sendContent(html);
 
-    // --- TROZO 3: MQTT ---
+    // --- CHUNK 3: MQTT ---
     html = "<div class='card'><h2>3. Home Assistant (MQTT)</h2>";
-    html += "<div class='cb'><label><input type='checkbox' id='mqtt_en' name='mqtt_en' value='1' onchange='toggleMQTT(this.checked)'" + String(config.mqtt_enabled ? " checked" : "") + "> Activar Integración</label></div>";
+    html += "<div class='cb'><label><input type='checkbox' id='mqtt_en' name='mqtt_en' value='1' onchange='toggleMQTT(this.checked)'" + String(config.mqtt_enabled ? " checked" : "") + "> Enable Integration</label></div>";
     html += "<div id='mqtt_fields' style='display:" + String(config.mqtt_enabled ? "block" : "none") + "; margin-top:10px;'>";
-    html += "<label>Nombre Dispositivo</label><input type='text' name='m_name' value='" + String(config.mqtt_name) + "'>";
+    html += "<label>Device Name</label><input type='text' name='m_name' value='" + String(config.mqtt_name) + "'>";
     html += "<div class='grid-2'><div><label>Broker IP</label><input type='text' name='m_host' value='" + String(config.mqtt_host) + "'></div>";
     html += "<div><label>Puerto</label><input type='number' name='m_port' value='" + String(config.mqtt_port) + "'></div></div>";
     html += "<label>Usuario</label><input type='text' name='m_user' value='" + String(config.mqtt_user) + "'>";
-    html += "<label>Contraseña</label><input type='password' name='m_pass' value='" + String(config.mqtt_pass) + "'></div></div>";
+    html += "<label>Password</label><input type='password' name='m_pass' value='" + String(config.mqtt_pass) + "'></div></div>";
     server.sendContent(html);
 
-    // --- TROZO 4: BOTONES Y FOOTER ---
+    // --- CHUNK 4: BOTONES Y FOOTER ---
     html = "<div class='dual-grid' style='grid-template-columns: repeat(3, 1fr); margin-bottom: 20px;'>";
-    html += "<button type='submit' class='btn save-btn'>GUARDAR</button>";
-    html += "<button type='button' class='btn restart-btn' onclick=\"if(confirm('¿Reiniciar?')) location.href='/restart';\">RESET</button>";
-    html += "<a href='/' class='btn back-btn'>VOLVER</a>";
+    html += "<button type='submit' class='btn save-btn'>SAVE</button>";
+    html += "<button type='button' class='btn restart-btn' onclick=\"if(confirm('Restart?')) location.href='/restart';\">RESET</button>";
+    html += "<a href='/' class='btn back-btn'>BACK</a>";
     html += "</div></form>";
 
-    html += "<button type='button' class='btn reset-btn' onclick=\"if(confirm('¿BORRAR TODO?')) location.href='/factory_reset';\">RESTABLECER FÁBRICA</button>";
+    html += "<button type='button' class='btn reset-btn' onclick=\"if(confirm('DELETE EVERYTHING?')) location.href='/factory_reset';\">FACTORY RESET</button>";
     html += "<div class='footer'><span>v" + String(FIRMWARE_VERSION) + " - fjgordillo86</span><span>IP: " + WiFi.localIP().toString() + "</span></div>";
     html += "<script>function toggleMQTT(s){ document.getElementById('mqtt_fields').style.display=s?'block':'none'; }</script></div></body></html>";
     
     server.sendContent(html);
-    server.sendContent(""); // Finalizar envío
+    server.sendContent(""); // Finish sending
 }
 
 // ====================================================================
@@ -975,23 +975,23 @@ void handleOTA() {
     String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'>";
     html += "<link rel='stylesheet' href='/style.css?v=3'>";
     html += "</head><body><div class='c'>";
-    html += "<h1>ACTUALIZACIÓN <span style='color:#3498db'>OTA</span></h1>";
+    html += "<h1>UPDATE <span style='color:#3498db'>OTA</span></h1>";
   
     html += "<div class='card'>";
     html += "<h3>Firmware</h3>";
     html += "<form method='POST' action='/update' enctype='multipart/form-data' id='upload_form'>";
   
-    // Input de archivo con estilo mejorado
+    // Styled file input
     html += "<div style='border: 2px dashed rgba(52, 152, 219, 0.5); padding: 20px; border-radius: 12px; margin-bottom: 20px; text-align: center;'>";
     html += "<input type='file' name='update' style='font-size: 12px; color: #ccc;'>";
     html += "</div>";
   
-    // Botón SUBIR
-    html += "<button type='submit' class='btn btn-ota'>SUBIR Y ACTUALIZAR</button>";
+    // UPLOAD button
+    html += "<button type='submit' class='btn btn-ota'>UPLOAD AND UPDATE</button>";
     html += "</form></div>";
 
-    // Botón VOLVER 
-    html += "<a href='/' class='btn btn-ajustes' style='margin-top: 10px;'>VOLVER AL PANEL</a>";
+    // BACK button 
+    html += "<a href='/' class='btn settings-btn' style='margin-top: 10px;'>BACK TO PANEL</a>";
 
     html += "<div class='footer'>";
     html += "<span>v" + String(FIRMWARE_VERSION) + " - fjgordillo86</span>"; 
@@ -1006,19 +1006,19 @@ void handleOTAUpload() {
     HTTPUpload& upload = server.upload();
     
     if (upload.status == UPLOAD_FILE_START) {
-        // 1. DETENER TAREA DE DISPLAY (Evita crash por conflicto de núcleos)
+        // 1. STOP DISPLAY TASK (prevents core conflict crash)
         if (displayTaskHandle != NULL) {
             vTaskDelete(displayTaskHandle);
             displayTaskHandle = NULL;
         }
         
-        // 2. APAGAR PANTALLA Y DETENER GIFS
+        // 2. TURN OFF SCREEN AND STOP GIFS
         if (display) display->fillScreen(0);
         gif.close(); // Cerrar acceso SD
         
-        Serial.printf("OTA: Iniciando actualización: %s\n", upload.filename.c_str());
+        Serial.printf("OTA: Starting update: %s\n", upload.filename.c_str());
         
-        // 3. INICIAR UPDATE
+        // 3. START UPDATE
         if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
             Update.printError(Serial);
         }
@@ -1030,8 +1030,8 @@ void handleOTAUpload() {
         
     } else if (upload.status == UPLOAD_FILE_END) {
         if (Update.end(true)) {
-            Serial.println("OTA: Éxito. Reiniciando...");
-            String s = "<!DOCTYPE html><html><head><link rel='stylesheet' href='/style.css?v=3'></head><body><div class='c'><div class='card'><h2>¡ÉXITO!</h2><p>Actualización completada.<br>Reiniciando sistema...</p></div><script>setTimeout(function(){location.href='/';},10000);</script></div></body></html>";
+            Serial.println("OTA: Success. Restarting...");
+            String s = "<!DOCTYPE html><html><head><link rel='stylesheet' href='/style.css?v=3'></head><body><div class='c'><div class='card'><h2>SUCCESS!</h2><p>Update complete.<br>Restarting systemName...</p></div><script>setTimeout(function(){location.href='/';},10000);</script></div></body></html>";
             server.send(200, "text/html", s);
             delay(1000); 
             ESP.restart();
@@ -1047,178 +1047,178 @@ void notFound() { server.send(404, "text/plain", "Not Found"); }
 void handleRestart() { 
     String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'>";
     html += "<meta name='viewport' content='width=device-width,initial-scale=1'>";
-    // La etiqueta meta es un respaldo físico por si el JS falla
+    // The meta tag is a fallback in case JS fails
     html += "<meta http-equiv='refresh' content='10;url=/'>"; 
     html += "<link rel='stylesheet' href='/style.css?v=3'>";
     html += "</head><body><div class='c'>";
     
     html += "<div class='card' style='text-align:center;'>";
-    html += "<h2 style='color:#00f2ff;'>REINICIANDO...</h2>";
-    html += "<p style='color:#eee;'>El sistema se está reiniciando para aplicar los cambios.</p>";
-    html += "<div class='info-box' style='border-color:#00f2ff;'>Espere unos segundos. Será redirigido al panel automáticamente.</div>";
+    html += "<h2 style='color:#00f2ff;'>RESTARTING...</h2>";
+    html += "<p style='color:#eee;'>The system is restarting to apply changes.</p>";
+    html += "<div class='info-box' style='border-color:#00f2ff;'>Wait a few seconds. You will be redirected to the panel automatically.</div>";
     
-    // Animación de carga
+    // Loading animation
     html += "<div style='margin: 20px auto; width: 40px; height: 40px; border: 4px solid rgba(0, 242, 255, 0.1); border-top: 4px solid #00f2ff; border-radius: 50%; animation: spin 1s linear infinite;'></div>";
     html += "<style>@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }</style>";
     
     html += "</div>";
     
-    // Aumentamos a 10 segundos para dar tiempo real al ESP32 a reconectar al WiFi
+    // Increase to 10 seconds to give the ESP32 real time to reconnect to WiFi
     html += "<script>setTimeout(function(){ window.location.href='/'; }, 10000);</script>";
     
     html += "</div></body></html>";
     
     server.send(200, "text/html", html);
     
-    // CRUCIAL: Aumentamos el delay a 2 segundos. 
-    // 500ms a veces es poco para que el buffer del chip envíe todo el HTML antes de morir.
-    Serial.println("Reiniciando ESP32...");
+    // CRITICAL: increase the delay to 2 seconds. 
+    // 500ms is sometimes too short for the chip buffer to send all HTML before stopping.
+    Serial.println("Restarting ESP32...");
     delay(2000); 
     ESP.restart();
 }
 
 // ====================================================================
-//                       GESTIÓN DE ARCHIVOS
+//                       FILE MANAGEMENT
 // ====================================================================
 
-// --- MANEJO DE SUBIDA DE ARCHIVOS (Optimizado para Multi-Upload) --- 
+// --- FILE UPLOAD HANDLING (Optimized for Multi-Upload) --- 
 
 void handleFileUpload(){ 
-    if (!sdMontada) { 
-        server.send(500, "text/plain", "Error: SD no montada.");
+    if (!sdMounted) { 
+        server.send(500, "text/plain", "Error: SD not mounted.");
         return; 
     } 
     
     HTTPUpload& upload = server.upload(); 
     
-    // 1. INICIO de la subida del archivo (UPLOAD_FILE_START)
+    // 1. File upload START (UPLOAD_FILE_START)
     if (upload.status == UPLOAD_FILE_START) { 
-        // La ruta de destino es la ruta actual (currentPath) + el nombre del archivo
+        // The target path is the current path (currentPath) plus the file name
         String uploadPath = currentPath + upload.filename;
         
-        Serial.printf("Inicio de la subida a: %s\n", uploadPath.c_str()); 
+        Serial.printf("Upload started to: %s\n", uploadPath.c_str()); 
         
-        // Abrir el archivo de la SD para escribir (sobrescribe si existe)
-        // La variable global fsUploadFile se usará para escribir el contenido.
+        // Open the SD file for writing (overwrites if it exists)
+        // The global fsUploadFile variable is used to write the content.
         fsUploadFile = SD.open(uploadPath.c_str(), FILE_WRITE);
 
         if (!fsUploadFile) {
-            Serial.printf("ERROR: No se pudo abrir el archivo %s para escribir.\n", uploadPath.c_str());
+            Serial.printf("ERROR: Could not open file %s for writing.\n", uploadPath.c_str());
         }
         
-    // 2. ESCRITURA de datos (UPLOAD_FILE_WRITE)
+    // 2. Data write (UPLOAD_FILE_WRITE)
     } else if (upload.status == UPLOAD_FILE_WRITE) { 
         if(fsUploadFile) { 
             fsUploadFile.write(upload.buf, upload.currentSize);
         } 
         
-    // 3. FIN de la subida del archivo (UPLOAD_FILE_END)
+    // 3. File upload END (UPLOAD_FILE_END)
     } else if (upload.status == UPLOAD_FILE_END) { 
         if (fsUploadFile) { 
             fsUploadFile.close(); 
-            Serial.printf("Subida finalizada. Nombre: %s | Tamaño: %d bytes\n", upload.filename.c_str(), upload.totalSize);
+            Serial.printf("Upload complete. Name: %s | Size: %d bytes\n", upload.filename.c_str(), upload.totalSize);
             
-            // Solo refrescar la lista de GIFs si el archivo subido es un GIF.
+            // Only refresh the GIF list if the uploaded file is a GIF.
             String filename = upload.filename;
             if (filename.endsWith(".gif") || filename.endsWith(".GIF")) {
-                 //listarArchivosGif(); Ya no listamos hemos cambiado a escribir directamente en SD tardaria mucho si hay demasiados GIFs
+                 //listGifFiles(); No longer listing here; it now writes directly to SD because it would take too long with too many GIFs
             }
         } else {
-            Serial.printf("Error en la subida del archivo %s: Falló la escritura o la apertura.\n", upload.filename.c_str());
+            Serial.printf("File upload error %s: Write or open failed.\n", upload.filename.c_str());
         }
     } 
 }
 
-// --- MANEJO DE BORRADO DE ARCHIVOS Y CARPETAS ---
+// --- FILE AND FOLDER DELETE HANDLING ---
 
 void handleFileDelete() {
-    if (!sdMontada) {
-        server.send(500, "text/plain", "Error: SD no montada.");
+    if (!sdMounted) {
+        server.send(500, "text/plain", "Error: SD not mounted.");
         return;
     }
 
-    // 1. BLOQUEO: Detenemos el panel LED para tener acceso exclusivo a la SD
-    enModoGestion = true; 
+    // 1. LOCK: stop the LED panel to get exclusive SD access
+    inFileManagerMode = true; 
 
     if (server.hasArg("name") && server.hasArg("type")) {
         String filename = server.arg("name");
         String filetype = server.arg("type");
         
-        // Aseguramos que currentPath termine en '/' antes de sumar el nombre
+        // Ensure currentPath ends with '/' before adding the name
         String tempPath = currentPath;
         if (!tempPath.endsWith("/")) tempPath += "/";
         String fullPath = tempPath + filename;
         
         if (filetype == "dir") {
-            // Nota: rmdir solo funciona si la carpeta está vacía
+            // Note: rmdir only works if the folder is empty
             if (SD.rmdir(fullPath.c_str())) { 
-                Serial.printf("Directorio borrado: %s\n", fullPath.c_str());
+                Serial.printf("Directory deleted: %s\n", fullPath.c_str());
             } else {
-                Serial.printf("ERROR: No se pudo borrar el directorio (¿Está vacío?): %s\n", fullPath.c_str());
+                Serial.printf("ERROR: Could not delete directory (is it empty?): %s\n", fullPath.c_str());
             }
         } else {
             if (SD.remove(fullPath.c_str())) {
-                Serial.printf("Archivo borrado: %s\n", fullPath.c_str());
+                Serial.printf("File deleted: %s\n", fullPath.c_str());
             } else {
-                Serial.printf("ERROR: No se pudo borrar el archivo: %s\n", fullPath.c_str());
+                Serial.printf("ERROR: Could not delete file: %s\n", fullPath.c_str());
             }
         }
     }
 
-    // 2. PAUSA: Pequeño respiro para que la SD actualice su tabla de archivos
+    // 2. PAUSA: Small pause so the SD updates its file table
     delay(100);
 
-    // 3. REDIRECCIÓN: Forzamos al navegador a recargar la lista de archivos limpia
+    // 3. REDIRECT: Force the browser to reload the clean file list
     server.sendHeader("Location", "/file_manager?path=" + currentPath);
     server.send(303); 
 }
 
-// --- MANEJO DE CREACIÓN DE CARPETAS ---
+// --- FOLDER CREATION HANDLING ---
 
 void handleCreateDir() {
-    enModoGestion = true; // <--- 1. BLOQUEO DE SEGURIDAD: Detener el panel LED inmediatamente
+    inFileManagerMode = true; // <--- 1. SAFETY LOCK: stop the LED panel immediately
 
     if (server.hasArg("name")) {
         String newDirName = server.arg("name");
         
-        // Limpiar el nombre de la carpeta (quitar espacios o barras raras)
+        // Clean the folder name (remove spaces or invalid slashes)
         newDirName.trim(); 
         
-        // Construir la ruta usando currentPath (que ya debería venir limpia)
+        // Build the path using currentPath, which should already be clean
         String fullPath = currentPath;
         if (!fullPath.endsWith("/")) fullPath += "/";
         fullPath += newDirName;
 
         if (SD.mkdir(fullPath.c_str())) {
-            Serial.printf("Carpeta creada con éxito: %s\n", fullPath.c_str());
+            Serial.printf("Folder created successfully: %s\n", fullPath.c_str());
         } else {
-            Serial.printf("ERROR al crear: %s (¿SD llena o protegida?)\n", fullPath.c_str());
+            Serial.printf("ERROR creating: %s (SD full or write-protected?)\n", fullPath.c_str());
         }
     }
 
-    // 2. PAUSA TÉCNICA: Damos 100ms para que la tabla de archivos de la SD se asiente
+    // 2. TECHNICAL PAUSE: Give the SD file table 100 ms to settle
     delay(100); 
 
-    // 3. REDIRECCIÓN LIMPIA: Usamos 303 (See Other) en lugar de 302 para forzar un GET fresco
+    // 3. CLEAN REDIRECT: Use 303 (See Other) instead of 302 to force a fresh GET
     server.sendHeader("Location", "/file_manager?path=" + currentPath);
     server.send(303); 
 }
 
-// --- MANEJO DE ARCHIVOS (VISUALIZACIÓN Y NAVEGACIÓN) ---
+// --- FILE HANDLING (DISPLAY AND NAVIGATION) ---
 
 void handleFileManager() {
-    enModoGestion = true; // El panel a "FILES MODE"
+    inFileManagerMode = true; // Put the panel in "FILES MODE"
 
     String requestedPath = server.hasArg("path") ? server.arg("path") : "/";
     
-    // Limpieza de ruta
+    // Path cleanup
     if (!requestedPath.startsWith("/")) requestedPath = "/" + requestedPath;
     
-    // Al acceder aquí, limpiamos la caché de archivos de la SD
-    // para que la siguiente lectura sea real.
+    // When entering here, clear the SD file cache
+    // so the next read is real.
     currentPath = requestedPath;
     
-    // Enviamos respuesta con cabeceras que prohíben la caché del navegador
+    // Send response headers that prevent browser caching
     server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     server.sendHeader("Pragma", "no-cache");
     server.sendHeader("Expires", "-1");
@@ -1227,57 +1227,57 @@ void handleFileManager() {
 }
 
 String fileManagerPage(String path) {
-    // 1. Verificación de seguridad inicial: ¿Está la SD montada? 
-    if (!sdMontada) {
+    // 1. Initial safety check: is the SD mounted? 
+    if (!sdMounted) {
         return "<!DOCTYPE html><html><head><meta charset='UTF-8'><link rel='stylesheet' href='/style.css?v=3'></head><body>"
-               "<div class='c'><div class='card'><h2>⚠️ SD No Detectada</h2>"
-               "<div class='info-box'>Asegúrate de que la tarjeta SD esté insertada y reinicia el dispositivo.</div>"
-               "<a href='/' class='btn back-btn'>VOLVER AL INICIO</a></div></div></body></html>";
+               "<div class='c'><div class='card'><h2>⚠️ SD Not Detected</h2>"
+               "<div class='info-box'>Make sure the SD card is inserted and restart the device.</div>"
+               "<a href='/' class='btn back-btn'>BACK HOME</a></div></div></body></html>";
     }
 
-    String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Gestor de Archivos</title><link rel='stylesheet' href='/style.css?v=3'></head><body><div class='c'>";
-    html += "<h1>Gestor de <span style='font-weight:200'>Archivos</span></h1>";
+    String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>File Manager</title><link rel='stylesheet' href='/style.css?v=3'></head><body><div class='c'>";
+    html += "<h1>File <span style='font-weight:200'>Manager</span></h1>";
 
-    // --- CARD 1: SUBIDA MÚLTIPLE ---
-    html += "<div class='card'><h2>Subir Archivos</h2>";
+    // --- CARD 1: MULTIPLE UPLOAD ---
+    html += "<div class='card'><h2>Upload Files</h2>";
     html += "<div class='info-box'>Subiendo a: <code>" + path + "</code></div>";
     html += "<form method='POST' action='/upload' enctype='multipart/form-data' style='margin-top:15px;'>";
-    html += "<input type='file' name='upload' id='file-input' multiple style='display:none;' onchange='document.getElementById(\"file-name\").innerHTML = this.files.length + \" archivo(s) seleccionados\"'>";
-    html += "<label for='file-input' class='btn' style='background:rgba(0,242,255,0.05); border:1px dashed #00f2ff; color:#00f2ff; margin-bottom:10px;'>📂 SELECCIONAR GIFS</label>";
-    html += "<div id='file-name' style='font-size:10px; text-align:center; margin-bottom:15px; color:#666; font-family:monospace;'>Ningún archivo seleccionado</div>";
+    html += "<input type='file' name='upload' id='file-input' multiple style='display:none;' onchange='document.getElementById(\"file-name\").innerHTML = this.files.length + \" file(s) selected\"'>";
+    html += "<label for='file-input' class='btn' style='background:rgba(0,242,255,0.05); border:1px dashed #00f2ff; color:#00f2ff; margin-bottom:10px;'>📂 SELECT GIFS</label>";
+    html += "<div id='file-name' style='font-size:10px; text-align:center; margin-bottom:15px; color:#666; font-family:monospace;'>No file selected</div>";
     html += "<input type='hidden' name='dir' value='" + path + "'>";
-    html += "<button type='submit' class='btn save-btn'>INICIAR SUBIDA</button>";
+    html += "<button type='submit' class='btn save-btn'>START UPLOAD</button>";
     html += "</form></div>";
 
-    // --- CARD 2: CREAR CARPETA ---
-    html += "<div class='card'><h2>Nueva Carpeta</h2>";
+    // --- CARD 2: CREATE FOLDER ---
+    html += "<div class='card'><h2>New Folder</h2>";
     html += "<form action='/create_dir' method='POST' style='margin-top:10px;'>";
-    html += "<input type='text' name='name' placeholder='Nombre de la carpeta' required style='margin-bottom:10px;'>";
-    html += "<button type='submit' class='btn btn-ota'>CREAR DIRECTORIO</button>";
+    html += "<input type='text' name='name' placeholder='Folder name' required style='margin-bottom:10px;'>";
+    html += "<button type='submit' class='btn btn-ota'>CREATE DIRECTORY</button>";
     html += "</form></div>";
 
-    // --- CARD 3: EXPLORADOR ---
-    html += "<div class='card'><h2>Explorador de SD</h2>";
+    // --- CARD 3: EXPLORER ---
+    html += "<div class='card'><h2>SD Explorer</h2>";
     html += "<div style='background:rgba(0,0,0,0.3); border-radius:15px; overflow:hidden; border:1px solid rgba(255,255,255,0.05);'>";
 
-    // Contenedor Flexbox para alinear botones en la misma línea
+    // Flexbox container to align buttons on the same line
     html += "<div style='display:flex; justify-content:space-between; align-items:center; padding:10px 15px; border-bottom:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.02);'>";
 
-    // 1. Botón de retroceso
+    // 1. Back button
     if (path != "/") {
     String parentPath = path.substring(0, path.lastIndexOf('/', path.length() - 2) + 1);
     if (parentPath == "") parentPath = "/";
-    html += "<a href='/file_manager?path=" + parentPath + "' style='color:#00f2ff; text-decoration:none; font-size:11px; font-weight:bold; display:flex; align-items:center;'>⬅️ SUBIR NIVEL</a>";
+    html += "<a href='/file_manager?path=" + parentPath + "' style='color:#00f2ff; text-decoration:none; font-size:11px; font-weight:bold; display:flex; align-items:center;'>⬅️ UP ONE LEVEL</a>";
     } else {
-    // Espaciador vacío para mantener el botón de refrescar a la derecha si estamos en la raíz
+    // Empty spacer to keep the refresh button on the right when at the root
     html += "<span></span>"; 
     }
-    // 2. Botón de Refrescar
-    // Usamos el mismo estilo de color pero con un toque verde neón para diferenciarlo
-    html += "<a href='/file_manager?path=" + path + "' style='color:#2ecc71; text-decoration:none; font-size:11px; font-weight:bold; display:flex; align-items:center; gap:5px;'>REFRESCAR 🔄</a>";
-    html += "</div>"; // Cierra el contenedor Flexbox
+    // 2. Refresh button
+    // Use the same color style with a neon green accent for differentiation
+    html += "<a href='/file_manager?path=" + path + "' style='color:#2ecc71; text-decoration:none; font-size:11px; font-weight:bold; display:flex; align-items:center; gap:5px;'>REFRESH 🔄</a>";
+    html += "</div>"; // Close the Flexbox container
 
-    // Apertura de directorio con pequeño reintento de seguridad
+    // Directory open with a small safety retry
     File root = SD.open(path.c_str());
     if (!root && path != "/") { 
         vTaskDelay(pdMS_TO_TICKS(50));
@@ -1285,7 +1285,7 @@ String fileManagerPage(String path) {
     }
 
     if (!root || !root.isDirectory()) {
-        html += "<p style='padding:20px; text-align:center; color:#ff2e63;'>Error al leer directorio. <a href='/file_manager?path=" + path + "' style='color:#00f2ff;'>Reintentar</a></p>";
+        html += "<p style='padding:20px; text-align:center; color:#ff2e63;'>Error reading directory. <a href='/file_manager?path=" + path + "' style='color:#00f2ff;'>Retry</a></p>";
     } else {
         File file = root.openNextFile();
         int count = 0;
@@ -1311,13 +1311,13 @@ String fileManagerPage(String path) {
             file = root.openNextFile();
         }
         root.close();
-        if (count == 0) html += "<p style='padding:30px; text-align:center; color:#444; font-size:12px;'>Esta carpeta está vacía</p>";
+        if (count == 0) html += "<p style='padding:30px; text-align:center; color:#444; font-size:12px;'>This folder is empty</p>";
     }
     html += "</div></div>";
 
-    // Botón para volver al inicio
+    // Button to return home
     html += "<div style='text-align:center; margin-top:20px; margin-bottom:20px;'>";
-    html += "<a href='/' class='btn back-btn' style='display:inline-block; width:auto; min-width:200px; max-width:90%;'>VOLVER AL PANEL PRINCIPAL</a>";
+    html += "<a href='/' class='btn back-btn' style='display:inline-block; width:auto; min-width:200px; max-width:90%;'>BACK TO PANEL PRINCIPAL</a>";
     html += "</div>";
 
     uint64_t totalBytes = SD.totalBytes();
@@ -1327,16 +1327,16 @@ String fileManagerPage(String path) {
 
     html += "<div class='footer'>";
     html += "<span>v" + String(FIRMWARE_VERSION) + " - fjgordillo86</span>"; 
-    html += "<span style='color:#888;'>SD: <strong style='color:#00f2ff;'>" + String(libreMB) + " MB</strong> Libres / " + String(totalMB) + " MB</span>";
+    html += "<span style='color:#888;'>SD: <strong style='color:#00f2ff;'>" + String(libreMB) + " MB</strong> Free / " + String(totalMB) + " MB</span>";
     html += "<span>IP: " + WiFi.localIP().toString() + "</span>";
     html += "</div>";
 
     html += "</div></body></html>";
 
-    // SCRIPT PARA GESTIONAR EL BORRADO VIA POST
+    // SCRIPT TO HANDLE DELETE THROUGH POST
     html += "<script>"
             "function postDelete(name, type) {"
-            "  if(!confirm('¿Estás seguro de borrar ' + name + '?')) return;"
+            "  if(!confirm('Are you sure you want to delete ' + name + '?')) return;"
             "  var form = document.createElement('form');"
             "  form.method = 'POST';"
             "  form.action = '/delete';"
@@ -1355,15 +1355,15 @@ String fileManagerPage(String path) {
 }
 
 // ====================================================================
-//                   FUNCIONES CORE DE VISUALIZACIÓN
+//                   CORE DISPLAY FUNCTIONS
 // ====================================================================
 
-// --- 1. Funciones Callback para AnimatedGIF ---
+// --- 1. AnimatedGIF callback functions ---
 
-// Función de dibujo de la librería GIF
+// GIF library drawing function
 void GIFDraw(GIFDRAW *pDraw)
 {
-    // Las variables deben estar declaradas en el ámbito global o como 'extern'
+    // Variables must be declared globally or as extern
     extern int x_offset; 
     extern int y_offset; 
     extern MatrixPanel_I2S_DMA *display; 
@@ -1371,26 +1371,26 @@ void GIFDraw(GIFDRAW *pDraw)
     uint8_t *s;
     uint16_t *d, *usPalette, usTemp[320];
     int x, y, iWidth;
-    int iCount; // Variable para el conteo de píxeles opacos
+    int iCount; // Variable for counting opaque pixels
 
-    if (!display || interrumpirReproduccion) return; 
+    if (!display || interruptPlayback) return; 
 
-    // BaseX: Punto de inicio del frame, incluyendo el offset de centrado
+    // BaseX: Frame starting point, including centering offset
     int baseX = pDraw->iX + x_offset; 
     
-    // Altura y ancho del frame
+    // Frame height and width
     iWidth = pDraw->iWidth;
     if (iWidth > 128) 
         iWidth = 128; 
         
     usPalette = pDraw->pPalette;
     
-    // Y: Coordenada Y de inicio del dibujo, incluyendo el offset de centrado
+    // Y: drawing start coordinate, including centering offset
     y = pDraw->iY + pDraw->y + y_offset; 
 
     s = pDraw->pPixels;
 
-    // Lógica para frames con transparencia o método de descarte (Disposal)
+    // Logic for frames with transparency or disposal method
     if (pDraw->ucHasTransparency) { 
         
         iCount = 0;
@@ -1399,7 +1399,7 @@ void GIFDraw(GIFDRAW *pDraw)
             if (s[x] == pDraw->ucTransparent) {
                 if (iCount) { 
                     for(int xOffset_ = 0; xOffset_ < iCount; xOffset_++ ){
-                        // 🛑 CORRECCIÓN: SUMAMOS 128 (Primera línea)
+                        // 🛑 FIX: ADD 128 (first line)
                         display->drawPixel(baseX + x - iCount + xOffset_ + 128, y, usTemp[xOffset_]); 
                     }
                     iCount = 0;
@@ -1411,28 +1411,28 @@ void GIFDraw(GIFDRAW *pDraw)
         
         if (iCount) {
             for(int xOffset_ = 0; xOffset_ < iCount; xOffset_++ ){
-                // 🛑 CORRECCIÓN: SUMAMOS 128 (Segunda línea)
+                // 🛑 FIX: ADD 128 (second line)
                 display->drawPixel(baseX + x - iCount + xOffset_ + 128, y, usTemp[xOffset_]); 
             }
         }
 
-    } else { // No hay transparencia (dibujo simple de línea completa)
+    } else { // No transparency (simple full-line draw)
         s = pDraw->pPixels;
         for (x=0; x<iWidth; x++)
-            // 🛑 CORRECCIÓN: SUMAMOS 128 (Tercera línea)
+            // 🛑 FIX: ADD 128 (third line)
             display->drawPixel(baseX + x + 128, y, usPalette[*s++]); 
     }
 } /* GIFDraw() */
 
-// Funciones de gestión de archivo para SD
+// SD file management functions
 static void * GIFOpenFile(const char *fname, int32_t *pSize)
 {
-    // Usamos la variable global FSGifFile
+    // Use the global FSGifFile variable
     extern File FSGifFile; 
     FSGifFile = M5STACK_SD.open(fname);
     if (FSGifFile) {
         *pSize = FSGifFile.size();
-        return (void *)&FSGifFile; // Devolver puntero a la variable global
+        return (void *)&FSGifFile; // Return a pointer to the global variable
     }
     return NULL;
 }
@@ -1449,7 +1449,7 @@ static int32_t GIFReadFile(GIFFILE *pFile, uint8_t *pBuf, int32_t iLen)
     int32_t iBytesRead;
     iBytesRead = iLen;
     File *f = static_cast<File *>(pFile->fHandle);
-    // El 'ugly work-around' de su ejemplo
+    // The ugly workaround from the example
     if ((pFile->iSize - pFile->iPos) < iLen)
         iBytesRead = pFile->iSize - pFile->iPos - 1; 
     if (iBytesRead <= 0)
@@ -1468,8 +1468,8 @@ static int32_t GIFSeekFile(GIFFILE *pFile, int32_t iPosition)
     return pFile->iPos;
 }
 
-// --- 2. Funciones de color y dibujo ---
-// Convierte colores HSV a formato RGB565 (Efecto Arcoíris)
+// --- 2. Color and drawing functions ---
+// Convert HSV colors to RGB565 format (Rainbow effect)
 uint16_t hsvTo565(uint16_t h, uint8_t s, uint8_t v) {
     float fH = h / 60.0;
     float fS = s / 255.0;
@@ -1487,7 +1487,7 @@ uint16_t hsvTo565(uint16_t h, uint8_t s, uint8_t v) {
     return ((uint16_t)((r + m) * 31) << 11) | ((uint16_t)((g + m) * 63) << 5) | (uint16_t)((b + m) * 31);
 }
 
-// Dibuja un carácter usando la fuente 5x8
+// Draw a character using the 5x8 font
 void drawCustomChar(int x, int y, int index, uint16_t color, int scale) {
     for (int i = 0; i < 5; i++) {
         uint8_t line = font5x8[index][i];
@@ -1500,62 +1500,62 @@ void drawCustomChar(int x, int y, int index, uint16_t color, int scale) {
 }
 
 
-// --- 3. Funciones de Utilidad de Visualización ---
+// --- 3. Display utility functions ---
 
-void mostrarMensaje(const char* mensaje, uint16_t color = 0xF800 ) {
+void showMessage(const char* messageText, uint16_t color = 0xF800 ) {
     if (!display) return;
     display->fillScreen(0);
     display->setTextSize(1);
     display->setTextWrap(false);
     display->setTextColor(color);
     display->setCursor(0, MATRIX_HEIGHT / 2 - 4);
-    display->print(mensaje);
+    display->print(messageText);
     display->flipDMABuffer();
 }
 
-// --- 4. Funcion para área de Notificaciones ---
+// --- 4. Function for notification area ---
 
-void dibujarBarraNotificaciones() {
+void drawNotificationBar() {
 
-    // Calculamos el punto de inicio igual que en tu reloj
+    // Calculate the start index as in the clock
     int offset = (display->width() - 0) / 2; 
 
-    // 1. Configuración de fuente
-    display->setFont(NULL);      // Fuente por defecto (5x7)
-    display->setTextSize(1);     // Tamaño original
+    // 1. Font configuration
+    display->setFont(NULL);      // Default font (5x7)
+    display->setTextSize(1);     // Size original
 
-    // 2. Borramos la franja superior en toda la pantalla
+    // 2. Clear the top strip across the whole screen
         display->fillRect(128, 0, 128, 8, 0); 
      
-    // 3. Dibujamos Icono según MQTT
-    uint16_t colorClima;
+    // 3. Draw icon according to MQTT
+    uint16_t weatherColor;
     const unsigned char* iconToDraw;
 
     switch(mqtt_weather_icon) {
-        case 0: iconToDraw = icon_sun;   colorClima = display->color565(255, 255, 0); break;
-        case 1: iconToDraw = icon_cloud; colorClima = display->color565(180, 180, 180); break;
-        case 2: iconToDraw = icon_rain;  colorClima = display->color565(0, 100, 255); break;
-        case 3: iconToDraw = icon_snow;  colorClima = display->color565(255, 255, 255); break;
-        case 4: iconToDraw = icon_storm; colorClima = display->color565(200, 0, 200); break;
-        case 5: iconToDraw = icon_moon; colorClima = display->color565(200, 200, 255); break;
-        case 6: iconToDraw = icon_lightning_rainy; colorClima = display->color565(200, 0, 255); break;
-        case 7: iconToDraw = icon_fog; colorClima = display->color565(180, 180, 200); break;
-        default: iconToDraw = icon_sun;  colorClima = display->color565(255, 255, 0); break;
+        case 0: iconToDraw = icon_sun;   weatherColor = display->color565(255, 255, 0); break;
+        case 1: iconToDraw = icon_cloud; weatherColor = display->color565(180, 180, 180); break;
+        case 2: iconToDraw = icon_rain;  weatherColor = display->color565(0, 100, 255); break;
+        case 3: iconToDraw = icon_snow;  weatherColor = display->color565(255, 255, 255); break;
+        case 4: iconToDraw = icon_storm; weatherColor = display->color565(200, 0, 200); break;
+        case 5: iconToDraw = icon_moon; weatherColor = display->color565(200, 200, 255); break;
+        case 6: iconToDraw = icon_lightning_rainy; weatherColor = display->color565(200, 0, 255); break;
+        case 7: iconToDraw = icon_fog; weatherColor = display->color565(180, 180, 200); break;
+        default: iconToDraw = icon_sun;  weatherColor = display->color565(255, 255, 0); break;
     }
-    display->drawBitmap(offset + 97, 0, iconToDraw, 8, 8, colorClima);
+    display->drawBitmap(offset + 97, 0, iconToDraw, 8, 8, weatherColor);
 
-    // 4. Dibujar Temperatura
+    // 4. Draw Temperature
     display->setTextColor(display->color565(200, 200, 200));
     display->setCursor(offset + 107, 0); 
     display->print(mqtt_temp);
     if(mqtt_temp != "--") {
-        // Dibujamos un pequeño cuadrado de 2x2 para el grado
+        // Draw a small 2x2 square for the degree symbol
         display->drawRect(offset + 119, 0, 2, 2, display->color565(200, 200, 200));
         display->setCursor(offset + 122, 0);
         display->print("C");
     }
 
-    // 5. Notificación
+    // 5. Notification
     if (mqtt_custom_msg != "") {
         display->setCursor(offset + 2, 0);
         display->setTextColor(display->color565(200, 200, 200));
@@ -1566,43 +1566,43 @@ void dibujarBarraNotificaciones() {
 
 
 // ====================================================================
-//                  FUNCIÓN DE ESCANEO DE CARPETAS Y LISTAS PARA LA UI
+//                  FOLDER AND LIST SCAN FUNCTION FOR THE UI
 // ====================================================================
 
-// Función para escanear y listar solo las CARPETAS dentro de un path base
+// Function that scans and lists only folders inside a base path
 void scanFolders(String basePath) {
-    allFolders.clear(); // Limpiamos la lista global de carpetas
+    allFolders.clear(); // Clear the global folder list
     
-    // 1. Aseguramos que el directorio base exista.
+    // 1. Make sure the base directory exists.
     if (!SD.exists(basePath)) {
-        SD.mkdir(basePath); // Creamos la carpeta /gifs si no existe
-        Serial.printf("Directorio base creado: %s\n", basePath.c_str());
+        SD.mkdir(basePath); // Create the /gifs folder if it does not exist
+        Serial.printf("Base directory created: %s\n", basePath.c_str());
         return; 
     }
 
     File root = SD.open(basePath);
     if (!root || !root.isDirectory()) {
-        Serial.printf("Error: %s no es un directorio válido.\n", basePath.c_str());
+        Serial.printf("Error: %s is not a valid directory.\n", basePath.c_str());
         return;
     }
     
-    Serial.printf("Escaneando subcarpetas dentro de: %s\n", basePath.c_str());
+    Serial.printf("Scanning subfolders inside: %s\n", basePath.c_str());
     
     File entry = root.openNextFile();
     while(entry){
         if(entry.isDirectory()){
             String dirName = entry.name();
-            // Construimos la ruta completa (Ejemplo: /gifs/animals)
+            // Build the full path (Ejemplo: /gifs/animals)
             String fullPath = basePath + "/" + dirName; 
             
-            // Añadir a la lista que se muestra en la interfaz web
+            // Add to the list shown in the web UI
             allFolders.push_back(fullPath); 
         }
         entry = root.openNextFile();
     }
     root.close();
     
-    // Ordenar la lista para mostrarla alfabéticamente en la web
+    // Sort the list alphabetically for the web UI
     if (allFolders.size() > 0) {
         std::sort(allFolders.begin(), allFolders.end());
     }
@@ -1613,7 +1613,7 @@ void scanPlaylists() {
     allPlaylists.clear();
     File root = SD.open("/playlists");
     if (!root || !root.isDirectory()) {
-        SD.mkdir("/playlists"); // La creamos si no existe
+        SD.mkdir("/playlists"); // Create it if it does not exist
         return;
     }
 
@@ -1631,29 +1631,29 @@ void scanPlaylists() {
 }
 
 // ====================================================================
-//                 GESTIÓN DE ARCHIVOS GIF & CACHÉ
+//                 GIF FILE AND CACHE MANAGEMENT
 // ====================================================================
-// Función modificada para escribir directamente en el archivo de caché
+// Modified function for writing directly to the cache file
 void scanGifDirectory(File &cacheFile, String path) {
     File root = SD.open(path);
     if (!root) {
-        Serial.printf("Error al abrir directorio: %s\n", path.c_str());
+        Serial.printf("Error opening directory: %s\n", path.c_str());
         return;
     }
     
     File entry = root.openNextFile();
     while(entry){
-        yield(); // Permitir que el sistema atienda procesos en segundo plano
+        yield(); // Allow the system to handle background processes
         if(!entry.isDirectory()){
             String fileName = entry.name();
             if (fileName.endsWith(".gif") || fileName.endsWith(".GIF")) {
                 String fullPath = path + "/" + fileName;
-                // Limpiamos el doble slash si la ruta es la raíz (/)
+                // Clean the double slash when the path is root (/)
                 if (path == "/") fullPath = fileName;
                 
-                // ESCRITURA DIRECTA A LA SD
+                // DIRECT WRITE TO SD
                 cacheFile.println(fullPath);
-                hayGifsEnCache = true; // Marcamos que hemos encontrado al menos uno
+                hasGifsInCache = true; // Mark that at least one GIF was found
             }
         }
         entry = root.openNextFile();
@@ -1662,47 +1662,47 @@ void scanGifDirectory(File &cacheFile, String path) {
 }
 
 
-// Función auxiliar para generar la firma de la configuración actual
+// Helper function that generates the current configuration signature
 String generateCacheSignature() {
     String signature = "";
-    // MODIFICADO: Usamos config.activeFolders que es el vector donde se guardan las carpetas seleccionadas
+    // MODIFIED: Use config.activeFolders, the vector where selected folders are stored
     for (const String& folder : config.activeFolders) { 
-        signature += folder + ":"; // Concatenamos las rutas separadas por :
+        signature += folder + ":"; // Concatenate paths separated by :
     }
     return signature;
 }
 
-// Función principal de listado de archivos GIF (usa la lógica de validación de firma)
-void listarArchivosGif() {
-    // 1. Mostrar mensaje informativo en el panel LED 
+// Main GIF file listing function (uses signature validation logic)
+void listGifFiles() {
+    // 1. Show an informational message on the LED panel 
     if (display) {
         display->fillScreen(0);
-        display->setTextColor(display->color565(0, 242, 255)); // Cian Cyberpunk
+        display->setTextColor(display->color565(0, 242, 255)); // Cyberpunk cyan
         display->setTextSize(1);
         display->setCursor(168, 7);
-        display->print("LISTANDO");
+        display->print("LISTING");
         display->setCursor(168, 17);
         display->print("GIFS...");
-        // Opcional: una línea de progreso estética
+        // Optional: a visual progress line
         display->drawFastHLine(160, 27, 64, display->color565(255, 0, 100)); 
     }
 
-    // 2. Generar firma basada en las carpetas activas
+    // 2. Generate a signature from active folders
     String currentSignature = generateCacheSignature();
     if (currentSignature.length() == 0) { 
-        hayGifsEnCache = false;
-        Serial.println("No hay carpetas seleccionadas.");
+        hasGifsInCache = false;
+        Serial.println("No folders selected.");
         return;
     }
 
-    // 3. Comprobar si la firma ha cambiado para evitar escaneos innecesarios
+    // 3. Check whether the signature changed to avoid unnecessary scans
     bool cacheIsValid = false;
     if (SD.exists(GIF_CACHE_SIG)) {
         File sigFile = SD.open(GIF_CACHE_SIG, FILE_READ);
         if (sigFile) {
             String savedSignature = sigFile.readStringUntil('\n');
             savedSignature.trim();
-            // Si la firma coincide y el archivo existe, la caché es válida
+            // If the signature matches and the file exists, the cache is valid
             if (savedSignature == currentSignature && SD.exists(GIF_CACHE_FILE)) {
                 cacheIsValid = true;
             }
@@ -1710,94 +1710,94 @@ void listarArchivosGif() {
         }
     }
 
-    // 4. Si la caché es válida, no escaneamos la SD, solo reseteamos el puntero
+    // 4. If the cache is valid, do not scan the SD; just reset the pointer
     if (cacheIsValid) {
-        Serial.println("Caché válida detectada. Usando lista existente.");
+        Serial.println("Valid cache detected. Using existing list.");
         gifCachePosition = 0; 
-        hayGifsEnCache = true;
+        hasGifsInCache = true;
         return;
     }
 
-    // 5. Si NO es válida (cambiaron carpetas o primer inicio), regeneramos
-    Serial.println("Generando nuevo índice de GIFs en SD...");
+    // 5. If it is not valid because folders changed or this is the first boot, regenerate it
+    Serial.println("Generating a new GIF index on SD...");
     
-    // Borramos el caché anterior para empezar limpio
+    // Delete the previous cache to start clean
     if (SD.exists(GIF_CACHE_FILE)) SD.remove(GIF_CACHE_FILE);
 
     File cacheFile = SD.open(GIF_CACHE_FILE, FILE_WRITE);
     if (!cacheFile) {
-        Serial.println("ERROR CRÍTICO: No se puede escribir en SD.");
+        Serial.println("CRITICAL ERROR: Cannot write to SD.");
         return;
     }
 
-    hayGifsEnCache = false;
-    // Escaneamos cada carpeta activa
+    hasGifsInCache = false;
+    // Scan each active folder
     for (const String& path : config.activeFolders) { 
         scanGifDirectory(cacheFile, path);
     }
     
     cacheFile.close();
 
-    // 6. Guardar la nueva firma
+    // 6. Save the new signature
     File newSigFile = SD.open(GIF_CACHE_SIG, FILE_WRITE);
     if (newSigFile) {
         newSigFile.print(currentSignature);
         newSigFile.close();
     }
     
-    // Reseteamos la posición de lectura al inicio del nuevo archivo
+    // Reset the read position to the start of the new file
     gifCachePosition = 0;
-    Serial.println("Indice generado correctamente en SD.");
+    Serial.println("Index generated successfully on SD.");
 }
 
-// --- Funciones de Modos de Reproducción ---
-// Variables globales necesarias para el loop
-extern unsigned long lastFrameTime; // Declarar esta variable en el ámbito global si aún no existe
-// extern WebServer server; // Asumiendo que el objeto server es global
+// --- Playback mode functions ---
+// Global variables required by the loop
+extern unsigned long lastFrameTime; // Declare this variable globally if it does not already exist
+// extern WebServer server; // Assuming the server object is global
 
-String obtenerSiguienteGifSD() {
-    // 1. Determinar qué archivo vamos a abrir
-    String rutaLista = (config.activePlaylist == "auto") ? GIF_CACHE_FILE : "/playlists/" + config.activePlaylist;
+String getNextGifFromSD() {
+    // 1. Determine which file will be opened
+    String listPath = (config.activePlaylist == "auto") ? GIF_CACHE_FILE : "/playlists/" + config.activePlaylist;
     
-    // 2. Verificación de existencia
-    if (!SD.exists(rutaLista)) {
-        Serial.println(">> Error: Lista no encontrada: " + rutaLista);
-        // Si la playlist falla, intentamos volver al modo auto
+    // 2. Existence check
+    if (!SD.exists(listPath)) {
+        Serial.println(">> Error: list not found: " + listPath);
+        // If the playlist fails, try to return to auto mode
         if (config.activePlaylist != "auto") {
-            rutaLista = GIF_CACHE_FILE;
-            if (!SD.exists(rutaLista)) return ""; // Si el caché tampoco existe, abortamos
+            listPath = GIF_CACHE_FILE;
+            if (!SD.exists(listPath)) return ""; // If the cache does not exist either, abort
         } else {
             return "";
         }
     }
 
-    File cacheFile = SD.open(rutaLista, FILE_READ);
+    File cacheFile = SD.open(listPath, FILE_READ);
     if (!cacheFile) return "";
 
-    // --- LÓGICA MODO ALEATORIO (Basado en posición de bytes) ---
+    // --- RANDOM MODE LOGIC (Based on byte position) ---
     uint32_t fileSize = cacheFile.size();
     
     if (config.randomMode && fileSize > 20) {
-        // Elegimos un punto aleatorio en el archivo
+        // Choose a random index in the file
         uint32_t randomPos = esp_random() % (fileSize - 10);
         cacheFile.seek(randomPos);
 
-        // Si no estamos al principio del archivo, avanzamos hasta el siguiente '\n'
-        // para asegurarnos de empezar a leer una ruta completa.
+        // If we are not at the start of the file, advance to the next '\n'
+        // to make sure a full path is read.
         if (randomPos != 0) {
             while (cacheFile.available()) {
                 if (cacheFile.read() == '\n') break;
             }
         }
     }
-    // --- LÓGICA MODO SECUENCIAL ---
+    // --- SEQUENTIAL MODE LOGIC ---
     else {
-        // Si hemos cambiado de playlist, gifCachePosition podría ser mayor que el tamaño del nuevo archivo
+        // If the playlist changed, gifCachePosition could be larger than the new file size
         if (gifCachePosition >= fileSize) gifCachePosition = 0;
         cacheFile.seek(gifCachePosition);
     }
 
-    // --- LECTURA COMÚN ---
+    // --- COMMON READ ---
     if (!cacheFile.available()) {
         cacheFile.seek(0);
         if (!config.randomMode) gifCachePosition = 0;
@@ -1812,37 +1812,37 @@ String obtenerSiguienteGifSD() {
     
     cacheFile.close();
 
-    // Verificación final: Si la línea leída está vacía, intentamos devolver el primero
+    // Final check: if the read line is empty, try to return the first one
     if (gifPath.length() < 3) return "";
 
     return gifPath;
 }
 
-void ejecutarModoGif() {
+void runGifMode() {
     if (!display) return; 
     
-    // 1. CAMBIO: Verificación usando la nueva bandera 'hayGifsEnCache' en lugar del vector
-    if (!sdMontada || !hayGifsEnCache) {
-        mostrarMensaje(!sdMontada ? "SD ERROR" : "NO GIFS");
+    // 1. CHANGE: check the new hasGifsInCache flag instead of the vector
+    if (!sdMounted || !hasGifsInCache) {
+        showMessage(!sdMounted ? "SD ERROR" : "NO GIFS");
         delay(200);
-        // Si la SD está montada pero no hay GIFs detectados, intentamos regenerar la lista
-        if (sdMontada) listarArchivosGif();
+        // If the SD is mounted but no GIFs were detected, try to regenerate the list
+        if (sdMounted) listGifFiles();
         return;
     }
 
-    // 2. CAMBIO: ELIMINADO el bloque de rotación de índices del vector.
-    // En su lugar, pedimos la siguiente ruta directamente al archivo de la SD.
-    String gifPath = obtenerSiguienteGifSD(); 
+    // 2. CHANGE: removed the vector index rotation block.
+    // Instead, request the next path directly from the SD file.
+    String gifPath = getNextGifFromSD(); 
     
-    // Si la función devuelve vacío (fin de archivo o error), salimos y reintentamos en el siguiente ciclo
+    // If the function returns empty due to EOF or error, exit and retry on the next cycle
     if (gifPath == "") {
         return;
     }
     
-    // Bucle de repetición del GIF (config.gifRepeats)
+    // GIF repeat loop (config.gifRepeats)
     for (int rep = 0; rep < config.gifRepeats; ++rep) { 
-        // SALIDA SI CAMBIA EL MODO O SE APAGA
-        if (config.playMode != 0 || !config.powerState || enModoGestion ) return;
+        // EXIT IF THE MODE CHANGES OR POWER TURNS OFF
+        if (config.playMode != 0 || !config.powerState || inFileManagerMode ) return;
         
         if (gif.open(gifPath.c_str(), GIFOpenFile, GIFCloseFile, GIFReadFile, GIFSeekFile, GIFDraw)) {
             
@@ -1853,22 +1853,22 @@ void ejecutarModoGif() {
 
             int delayMs;
             
-            // Bucle principal de reproducción de frames
+            // Main frame playback loop
             while (gif.playFrame(true, &delayMs)) {
                 
-                // Verificación de Apagado / Modo Gestión
-                if (!config.powerState || enModoGestion || config.playMode != 0 || recargarGifsPendiente || interrumpirReproduccion) {
+                // Power-off / manager mode check
+                if (!config.powerState || inFileManagerMode || config.playMode != 0 || pendingGifReload || interruptPlayback) {
                     gif.close();
-                    return; // Sale inmediatamente de la reproducción
+                    return; // Exit playback immediately
                 }
 
-                // Manejo de WebServer y espera no bloqueante
+                // WebServer handling and non-blocking wait
                 server.handleClient(); 
                 
                 unsigned long targetTime = millis() + delayMs;
                 while (millis() < targetTime) {
-                    // Volvemos a chequear dentro de la espera del frame
-                    if (!config.powerState || enModoGestion || interrumpirReproduccion) {
+                    // Check again during the frame wait
+                    if (!config.powerState || inFileManagerMode || interruptPlayback) {
                         gif.close();
                         return;
                     }
@@ -1880,12 +1880,12 @@ void ejecutarModoGif() {
             
         } else {
             Serial.printf("Error abriendo GIF: %s\n", gifPath.c_str());
-            // Si falla un archivo específico, no detenemos todo, solo mostramos error brevemente
-            mostrarMensaje("Error GIF", display->color565(255, 255, 0));
+            // If a specific file fails, do not stop everything; just show a brief error
+            showMessage("Error GIF", display->color565(255, 255, 0));
             
             unsigned long start = millis();
             while (millis() - start < 1000) {
-                 if (!config.powerState || enModoGestion) return;
+                 if (!config.powerState || inFileManagerMode) return;
                  server.handleClient();
                  yield();
             }
@@ -1893,14 +1893,14 @@ void ejecutarModoGif() {
     }
 
     // 3. CAMBIO: ELIMINADO currentGifIndex++; 
-    // La función obtenerSiguienteGifSD() ya avanza el cursor automáticamente.
+    // getNextGifFromSD() already advances the cursor automatically.
 }
 
-void ejecutarModoTexto() {
+void runTextMode() {
     if (!display) return; 
 
-    // 1. Configuración de color
-    uint16_t colorTexto = display->color565(
+    // 1. Color configuration
+    uint16_t textDisplayColor = display->color565(
         (config.slidingTextColor >> 16) & 0xFF,
         (config.slidingTextColor >> 8) & 0xFF,
         config.slidingTextColor & 0xFF
@@ -1908,66 +1908,66 @@ void ejecutarModoTexto() {
 
     display->setTextSize(1); 
     display->setTextWrap(false); 
-    display->setTextColor(colorTexto); 
+    display->setTextColor(textDisplayColor); 
 
-    // 2. Control de tiempo para el scroll
+    // 2. Timing control for scrolling
     if (millis() - lastScrollTime > config.textSpeed) {
         lastScrollTime = millis(); 
-        xPosMarquesina--;
+        marqueeXPos--;
 
-        // Calculamos el ancho real en píxeles 
+        // Calculate the real width in pixels 
         int16_t x1, y1;
         uint16_t w, h;
         display->getTextBounds(config.slidingText, 0, 0, &x1, &y1, &w, &h);
 
-        // Si el texto terminó de pasar
-        if (xPosMarquesina < -((int)w)) {
-            xPosMarquesina = display->width(); 
+        // If the text finished scrolling
+        if (marqueeXPos < -((int)w)) {
+            marqueeXPos = display->width(); 
         }
 
         // 3. Dibujado
-        display->fillScreen(0); // Limpiar buffer
-        // MATRIX_HEIGHT / 2 - 4 suele centrar bien la fuente estándar de 7-8px
-        display->setCursor(xPosMarquesina, (MATRIX_HEIGHT / 2) - (h / 2));
+        display->fillScreen(0); // Clean buffer
+        // MATRIX_HEIGHT / 2 - 4 usually centers the standard 7-8px font well
+        display->setCursor(marqueeXPos, (MATRIX_HEIGHT / 2) - (h / 2));
         display->print(config.slidingText);
         display->flipDMABuffer(); 
     }
 }
 
-// 2. Ejecutar Modo Reloj Completo HH:MM:SS
-void ejecutarModoReloj() {
+// 2. Ejecutar Clock Mode Completo HH:MM:SS
+void runClockMode() {
     struct tm timeinfo;
     if (!getLocalTime(&timeinfo)) return;
 
     static int minAnterior = -1;
-    static int modoAnterior = -1;
+    static int previousMode = -1;
     static int estiloAnterior = -1;
 
-    // 1. GESTIÓN DE POSICIONAMIENTO DINÁMICO
-    // Si MQTT activo: startY = 9 (reloj abajo). Si MQTT apagado: startY = 6 (reloj arriba).
+    // 1. DYNAMIC POSITIONING MANAGEMENT
+    // If MQTT is active: startY = 9 (clock lower). If MQTT is off: startY = 6 (clock higher).
     int startY = config.mqtt_enabled ? 9 : 6;
     
-    // Si cambia el minuto o el modo, limpiamos TODO para evitar residuos
-    if (modoAnterior != config.playMode || timeinfo.tm_min != minAnterior || estiloAnterior != config.clockEffect) {
+    // If the minute or mode changes, clear everything to avoid artifacts
+    if (previousMode != config.playMode || timeinfo.tm_min != minAnterior || estiloAnterior != config.clockEffect) {
         display->fillScreen(0); 
         minAnterior = timeinfo.tm_min;
-        modoAnterior = config.playMode;
+        previousMode = config.playMode;
         estiloAnterior = config.clockEffect; 
-        Serial.println("Reloj: Refresco por cambio de estilo o tiempo.");
+        Serial.println("Clock: Refresh due to style or time change.");
     }
 
-    // 2. PREPARACIÓN DEL RELOJ
+    // 2. CLOCK PREPARATION
     char fullTimeStr[9]; 
     strftime(fullTimeStr, sizeof(fullTimeStr), "%H:%M:%S", &timeinfo);
      
     int startX = 128; 
     uint32_t ms = millis();
 
-    // 3. DIBUJAR LOS DÍGITOS DEL RELOJ
+    // 3. DRAW CLOCK DIGITS
     for (int i = 0; i < 8; i++) {
         int xPos = startX + (i * 16);
         
-        // Limpiamos solo el rectángulo donde va este dígito (evita parpadeo global)
+        // Clear only the rectangle for this digit to avoid global flicker
         display->fillRect(xPos, startY, 15, 24, 0); 
 
         uint16_t color;
@@ -2020,7 +2020,7 @@ void ejecutarModoReloj() {
             default: color = 0xFFFF; break;
         }
 
-        // Dibujamos el dígito
+        // Draw the digit
         if (fullTimeStr[i] >= '0' && fullTimeStr[i] <= '9') {
             drawCustomChar(xPos, startY, fullTimeStr[i] - '0', color, 3);
         } else if (fullTimeStr[i] == ':') {
@@ -2031,36 +2031,36 @@ void ejecutarModoReloj() {
         }
     }
 
-    // 4. DIBUJAR LA BARRA DE NOTIFICACIONES (Solo si MQTT está activo)
+    // 4. DRAW THE NOTIFICATION BAR (only when MQTT is active)
     if (config.mqtt_enabled) {
-        dibujarBarraNotificaciones();
+        drawNotificationBar();
     }
 }
 
-void ejecutarModoArcade() {
-    // Si entramos aquí pero ya estamos en modo gestión, salimos antes de abrir nada
-    if (enModoGestion) return;
+void runArcadeMode() {
+    // If we get here while already in manager mode, exit before opening anything
+    if (inFileManagerMode) return;
 
     char pathChar[128];
-    rutaGifArcade.toCharArray(pathChar, sizeof(pathChar));
+    arcadeGifPath.toCharArray(pathChar, sizeof(pathChar));
     
     if (gif.open(pathChar, GIFOpenFile, GIFCloseFile, GIFReadFile, GIFSeekFile, GIFDraw)) {
-        // El bucle principal del GIF
+        // Main GIF loop
         while (gif.playFrame(true, NULL)) {
             
-            // Si el servidor activa enModoGestion para leer la caché,
-            // cerramos el archivo y salimos de la función inmediatamente.
-            if (enModoGestion || config.playMode != 3) { 
+            // If the server enables inFileManagerMode to read the cache,
+            // close the file and exit the function immediately.
+            if (inFileManagerMode || config.playMode != 3) { 
                 gif.close(); 
                 return; 
             }
             
-            yield(); // Mantiene vivo el sistema
+            yield(); // Keep the system alive
         }
         gif.close();
     } else {
-        // Si falla, volvemos al default
-        rutaGifArcade = "/batocera/default/_default.gif";
+        // If it fails, return to default
+        arcadeGifPath = "/batocera/default/_default.gif";
     }
 }
 
@@ -2072,14 +2072,14 @@ void ejecutarModoArcade() {
 void sendMQTTDiscovery() {
     mqttClient.setBufferSize(1024);
 
-    // 1. DEFINIR LOS IDs (Esto es lo que te faltaba)
-    // Usamos chipID (la MAC) para que sea único e invariable
+    // 1. DEFINE IDs
+    // Use chipID (the MAC) so it is unique and stable
     String technicalID = "retropixel_" + chipID; 
     
-    // El nombre amigable que el usuario puso en la web
+    // The friendly name set by the user in the web UI
     String friendlyName = (String(config.mqtt_name).length() > 0) ? String(config.mqtt_name) : "Retro Pixel " + chipID;
 
-    // 2. CREAR EL JSON DEL DISPOSITIVO
+    // 2. CREATE THE DEVICE JSON
     String deviceJSON = ",\"dev\":{";
     deviceJSON += "\"ids\":[\"" + technicalID + "\"],";
     deviceJSON += "\"name\":\"" + friendlyName + "\",";
@@ -2089,99 +2089,99 @@ void sendMQTTDiscovery() {
     deviceJSON += "\"cu\":\"http://" + WiFi.localIP().toString() + "/\"";
     deviceJSON += "}";
 
-    // 3. ENTIDADES (Usamos technicalID para que los tópicos sean únicos por panel)
+    // 3. ENTITIES (Use technicalID so topics are unique per panel)
     
-    // --- SELECT DE MODOS ---
-    String modeConfig = "{\"name\":\"Modo\",\"stat_t\":\"retropixel/" + technicalID + "/state/mode\",\"cmd_t\":\"retropixel/" + technicalID + "/cmd/mode\",\"options\":[\"GIFs\",\"Reloj\",\"Texto\",\"Arcade\"],\"uniq_id\":\"" + technicalID + "_mode\"" + deviceJSON + "}";
+    // --- MODE SELECT ---
+    String modeConfig = "{\"name\":\"Mode\",\"stat_t\":\"retropixel/" + technicalID + "/state/mode\",\"cmd_t\":\"retropixel/" + technicalID + "/cmd/mode\",\"options\":[\"GIFs\",\"Clock\",\"Text\",\"Arcade\"],\"uniq_id\":\"" + technicalID + "_mode\"" + deviceJSON + "}";
     mqttClient.publish(("homeassistant/select/" + technicalID + "/mode/config").c_str(), modeConfig.c_str(), true);
 
     // --- SWITCH POWER ---
-    String powerConfig = "{\"name\":\"Estado\",\"stat_t\":\"retropixel/" + technicalID + "/state/power\",\"cmd_t\":\"retropixel/" + technicalID + "/cmd/power\",\"payload_on\":\"ON\",\"payload_off\":\"OFF\",\"uniq_id\":\"" + technicalID + "_power\"" + deviceJSON + "}";
+    String powerConfig = "{\"name\":\"State\",\"stat_t\":\"retropixel/" + technicalID + "/state/power\",\"cmd_t\":\"retropixel/" + technicalID + "/cmd/power\",\"payload_on\":\"ON\",\"payload_off\":\"OFF\",\"uniq_id\":\"" + technicalID + "_power\"" + deviceJSON + "}";
     mqttClient.publish(("homeassistant/switch/" + technicalID + "/power/config").c_str(), powerConfig.c_str(), true);
 
-    // --- BRILLO ---
-    String brightConfig = "{\"name\":\"Brillo\",\"stat_t\":\"retropixel/" + technicalID + "/state/bright\",\"cmd_t\":\"retropixel/" + technicalID + "/cmd/bright\",\"min\":0,\"max\":255,\"uniq_id\":\"" + technicalID + "_bright\"" + deviceJSON + "}";
+    // --- BRIGHTNESS ---
+    String brightConfig = "{\"name\":\"Brightness\",\"stat_t\":\"retropixel/" + technicalID + "/state/bright\",\"cmd_t\":\"retropixel/" + technicalID + "/cmd/bright\",\"min\":0,\"max\":255,\"uniq_id\":\"" + technicalID + "_bright\"" + deviceJSON + "}";
     mqttClient.publish(("homeassistant/number/" + technicalID + "/bright/config").c_str(), brightConfig.c_str(), true);
 
-    // --- TEXTBOX PARA EL MODO TEXTO ---
-    String textConfig = "{\"name\":\"Texto Pantalla\",\"stat_t\":\"retropixel/" + technicalID + "/state/text\",\"cmd_t\":\"retropixel/" + technicalID + "/cmd/text\",\"mode\":\"text\",\"min\":1,\"max\":100,\"uniq_id\":\"" + technicalID + "_text\"" + deviceJSON + "}";
+    // --- TEXTBOX FOR TEXT MODE ---
+    String textConfig = "{\"name\":\"Display Text\",\"stat_t\":\"retropixel/" + technicalID + "/state/text\",\"cmd_t\":\"retropixel/" + technicalID + "/cmd/text\",\"mode\":\"text\",\"min\":1,\"max\":100,\"uniq_id\":\"" + technicalID + "_text\"" + deviceJSON + "}";
     mqttClient.publish(("homeassistant/text/" + technicalID + "/text/config").c_str(), textConfig.c_str(), true);
-    // Forzamos la actualización del estado con el valor que ya tiene el ESP32
+    // Force the state update with the current ESP32 value
     mqttClient.publish(("retropixel/" + technicalID + "/state/text").c_str(), config.slidingText.c_str(), true);
 
-    // --- SELECTOR DE ESTILO DE RELOJ --- 
-    String clockStyleConfig = "{\"name\":\"Estilo Reloj\",\"stat_t\":\"retropixel/" + technicalID + "/state/clock_style\",\"cmd_t\":\"retropixel/" + technicalID + "/cmd/clock_style\",\"options\":[\"Rainbow Flow\",\"Static Rainbow\",\"Solid Neon\",\"Night Fire\",\"Pulse Breath\",\"Matrix Digital\",\"Gradient 50%\",\"Gradient 80%\"],\"uniq_id\":\"" + technicalID + "_clock_style\"" + deviceJSON + "}";
+    // --- CLOCK STYLE SELECTOR --- 
+    String clockStyleConfig = "{\"name\":\"Clock Style\",\"stat_t\":\"retropixel/" + technicalID + "/state/clock_style\",\"cmd_t\":\"retropixel/" + technicalID + "/cmd/clock_style\",\"options\":[\"Rainbow Flow\",\"Static Rainbow\",\"Solid Neon\",\"Night Fire\",\"Pulse Breath\",\"Matrix Digital\",\"Gradient 50%\",\"Gradient 80%\"],\"uniq_id\":\"" + technicalID + "_clock_style\"" + deviceJSON + "}";
     mqttClient.publish(("homeassistant/select/" + technicalID + "/clock_style/config").c_str(), clockStyleConfig.c_str(), true);
 
-    // --- RUEDA DE COLOR PARA EL RELOJ ---
-    String clockLightConfig = "{\"name\":\"Color Reloj\",\"stat_t\":\"retropixel/" + technicalID + "/state/clock_color\",\"cmd_t\":\"retropixel/" + technicalID + "/cmd/clock_color\",\"rgb_cmd_t\":\"retropixel/" + technicalID + "/cmd/clock_color/set\",\"rgb_stat_t\":\"retropixel/" + technicalID + "/state/clock_color/set\",\"payload_on\":\"ON\",\"payload_off\":\"OFF\",\"uniq_id\":\"" + technicalID + "_clock_rgb\"" + deviceJSON + "}";  
+    // --- COLOR WHEEL FOR CLOCK ---
+    String clockLightConfig = "{\"name\":\"Clock Color\",\"stat_t\":\"retropixel/" + technicalID + "/state/clock_color\",\"cmd_t\":\"retropixel/" + technicalID + "/cmd/clock_color\",\"rgb_cmd_t\":\"retropixel/" + technicalID + "/cmd/clock_color/set\",\"rgb_stat_t\":\"retropixel/" + technicalID + "/state/clock_color/set\",\"payload_on\":\"ON\",\"payload_off\":\"OFF\",\"uniq_id\":\"" + technicalID + "_clock_rgb\"" + deviceJSON + "}";  
     mqttClient.publish(("homeassistant/light/" + technicalID + "/clock_color/config").c_str(), clockLightConfig.c_str(), true);
 
-    // --- RUEDA DE COLOR PARA EL TEXTO ---
-    String textLightConfig = "{\"name\":\"Color Texto\",\"stat_t\":\"retropixel/" + technicalID + "/state/text_color\",\"cmd_t\":\"retropixel/" + technicalID + "/cmd/text_color\",\"rgb_cmd_t\":\"retropixel/" + technicalID + "/cmd/text_color/set\",\"rgb_stat_t\":\"retropixel/" + technicalID + "/state/text_color/set\",\"payload_on\":\"ON\",\"payload_off\":\"OFF\",\"uniq_id\":\"" + technicalID + "_text_rgb\"" + deviceJSON + "}";    
+    // --- COLOR WHEEL FOR TEXT ---
+    String textLightConfig = "{\"name\":\"Text Color\",\"stat_t\":\"retropixel/" + technicalID + "/state/text_color\",\"cmd_t\":\"retropixel/" + technicalID + "/cmd/text_color\",\"rgb_cmd_t\":\"retropixel/" + technicalID + "/cmd/text_color/set\",\"rgb_stat_t\":\"retropixel/" + technicalID + "/state/text_color/set\",\"payload_on\":\"ON\",\"payload_off\":\"OFF\",\"uniq_id\":\"" + technicalID + "_text_rgb\"" + deviceJSON + "}";    
     mqttClient.publish(("homeassistant/light/" + technicalID + "/text_color/config").c_str(), textLightConfig.c_str(), true);
 
-    Serial.print("Discovery enviado para: ");
+    Serial.print("Discovery sent for:  ");
     Serial.println(friendlyName);
 }
 
 void reconnectMQTT() {
-    // Si el MQTT no está activado en la web, salimos inmediatamente
+    // If MQTT is not enabled in the web UI, exit immediately
     if (!config.mqtt_enabled) return;
 
-    int reintentos = 0;
-    const int maxReintentos = 5;
+    int retries = 0;
+    const int maxRetries = 5;
     String technicalID = "retropixel_" + chipID;
 
-    while (!mqttClient.connected() && reintentos < maxReintentos) {
-        Serial.printf("Intentando conexión MQTT (Intento %d/%d)...\n", reintentos + 1, maxReintentos);
+    while (!mqttClient.connected() && retries < maxRetries) {
+        Serial.printf("Trying MQTT connection (Attempt %d/%d)...\n", retries + 1, maxRetries);
         
-        // Configuramos el servidor con los datos actuales de la web
+        // Configure the server with the current web settings
         mqttClient.setServer(config.mqtt_host, config.mqtt_port);
 
-        // Intentamos conectar usando el technicalID como ClientID único
+        // Try to connect using technicalID as the unique ClientID
         if (mqttClient.connect(technicalID.c_str(), config.mqtt_user, config.mqtt_pass)) {
-            Serial.println("¡Conectado a MQTT con éxito!");
+            Serial.println("Connected to MQTT successfully!");
             
-            // 1. SUSCRIPCIÓN DINÁMICA CON COMODÍN
-            // Escuchamos todo lo que venga de HA hacia nuestro ID
+            // 1. DYNAMIC WILDCARD SUBSCRIPTION
+            // Listen to everything HA sends to our ID
             mqttClient.subscribe(("retropixel/" + technicalID + "/cmd/#").c_str());
             Serial.println("Suscrito a: retropixel/" + technicalID + "/cmd/#");
 
-            // 2. Enviamos el Discovery para que aparezca/se actualice en HA
+            // 2. Send Discovery so it appears or updates in HA
             sendMQTTDiscovery();
 
-             // 3. Sincronizar el estado actual
+             // 3. Synchronize the current state
             syncMQTTState();
 
-            reintentos = 0; // Reseteamos contador al conectar
+            retries = 0; // Reset counter on connection
         } else {
-            Serial.print("Fallo conexión, rc=");
+            Serial.print("Connection failed, rc=");
             Serial.print(mqttClient.state());
-            Serial.println(" reintentando en 5 segundos...");
+            Serial.println(" retrying in 5 seconds...");
             
-            reintentos++;
+            retries++;
             
-            // Espera de 5 segundos sin bloquear el núcleo (Core 0)
+            // 5-second wait without blocking the core (Core 0)
             vTaskDelay(pdMS_TO_TICKS(5000)); 
 
-            // Si durante la espera desactivas MQTT en la web, salimos
+            // If MQTT is disabled from the web UI during the wait, exit
             if (!config.mqtt_enabled) return;
         }
     }
 
-    if (reintentos >= maxReintentos) {
-        Serial.println("MQTT: Máximo de reintentos alcanzado. Se reintentará en el próximo ciclo del loop.");
+    if (retries >= maxRetries) {
+        Serial.println("MQTT: Maximum retry count reached. It will retry on the next loop cycle.");
     }
 }
 
 
 void callback(char* topic, byte* payload, unsigned int length) {
-    // Convertir el mensaje recibido a String
+    // Convert the received message to String
     String message = "";
     for (int i = 0; i < length; i++) message += (char)payload[i];
 
-    // Creamos el prefijo dinámico para responder el estado al tópico correcto
+    // Create the dynamic prefix to publish state to the correct topic
     String technicalID = "retropixel_" + chipID;
     String stateTopicPrefix = "retropixel/" + technicalID + "/state/";
     String strTopic = String(topic);
@@ -2189,39 +2189,39 @@ void callback(char* topic, byte* payload, unsigned int length) {
     Serial.println("MQTT Recibido [" + strTopic + "]: " + message);
 
     // ----------------------------------------------------
-    // 1. CONTROL DE MODO (GIFs, Texto, Reloj, Arcade)
+    // 1. MODE CONTROL (GIFs, Text, Clock, Arcade)
     // ----------------------------------------------------
     if (strTopic.endsWith("/cmd/mode")) {
-        int modoAnterior = config.playMode; // Guardamos el modo que había
+        int previousMode = config.playMode; // Store the previous mode
 
         if (message == "GIFs")      config.playMode = 0;
-        else if (message == "Texto") config.playMode = 1;
-        else if (message == "Reloj") config.playMode = 2;
+        else if (message == "Text") config.playMode = 1;
+        else if (message == "Clock") config.playMode = 2;
         else if (message == "Arcade") config.playMode = 3;
 
         if (config.playMode == 0) {
             gif.close(); 
             
-            // CRÍTICO: Si la lista de GIFs está vacía, hay que llenarla
-            // o el modo GIF entrará y saldrá sin dibujar nada (pantalla negra).
-            if (!hayGifsEnCache) {
-                Serial.println("MQTT: Lista vacía, escaneando SD...");
-                listarArchivosGif(); 
+            // CRITICAL: if the GIF list is empty, it must be filled
+            // or GIF mode will enter and exit without drawing anything (black screen).
+            if (!hasGifsInCache) {
+                Serial.println("MQTT: Empty list, scanning SD...");
+                listGifFiles(); 
             }
 
-            // Aseguramos que el índice sea válido tras el escaneo
+            // Make sure the index is valid after scanning
             gifCachePosition = 0;        
-            Serial.println("MQTT: Modo GIF activado.");
+            Serial.println("MQTT: GIF mode enabled.");
         }
 
         display->fillScreen(0);
         savePlaybackConfig();
         mqttClient.publish((stateTopicPrefix + "mode").c_str(), message.c_str(), true);
-        Serial.println("MQTT: Modo cambiado y reseteado a: " + message);
+        Serial.println("MQTT: Mode changed and reset to: " + message);
        
     }
     // ----------------------------------------------------
-    // 2. CONTROL DE ENCENDIDO / APAGADO
+    // 2. POWER ON/OFF CONTROL
     // ----------------------------------------------------
     else if (strTopic.endsWith("/cmd/power")) {
         config.powerState = (message == "ON");
@@ -2230,7 +2230,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
         savePlaybackConfig();
     }
     // ----------------------------------------------------
-    // 3. CONTROL DE BRILLO (0 - 255)
+    // 3. BRIGHTNESS CONTROL (0 - 255)
     // ----------------------------------------------------
     else if (strTopic.endsWith("/cmd/bright")) {
         config.brightness = constrain(message.toInt(), 0, 255);
@@ -2239,17 +2239,17 @@ void callback(char* topic, byte* payload, unsigned int length) {
         savePlaybackConfig();
     }
     // ----------------------------------------------------
-    // 4. CONTROL DE TEXTO PERSONALIZADO
+    // 4. CUSTOM TEXT CONTROL
     // ----------------------------------------------------
     else if (strTopic.endsWith("/cmd/text")) {
         config.slidingText = message;
-        xPosMarquesina = display->width();
+        marqueeXPos = display->width();
         savePlaybackConfig();
         mqttClient.publish((stateTopicPrefix + "text").c_str(), message.c_str(), true);
-        Serial.println("Nuevo texto MQTT (slidingText): " + message);
+        Serial.println("New MQTT text (slidingText): " + message);
     }
     // ----------------------------------------------------
-    // 5. NOTIFICACIONES Y TIEMPO
+    // 5. NOTIFICATIONS Y TIME
     // ---------------------------------------------------- 
     else if (strTopic.endsWith("/cmd/temp")) {
          mqtt_temp = message; 
@@ -2257,37 +2257,37 @@ void callback(char* topic, byte* payload, unsigned int length) {
     }
     else if (strTopic.endsWith("/cmd/weather")) { 
         mqtt_weather_icon = message.toInt(); 
-        Serial.println("MQTT Clima (Icon ID): " + String(mqtt_weather_icon));
+        Serial.println("MQTT Weather (Icon ID): " + String(mqtt_weather_icon));
     }
     else if (strTopic.endsWith("/cmd/notify")) { 
         mqtt_custom_msg = message; 
-        Serial.println("MQTT Notificación: " + mqtt_custom_msg);
+        Serial.println("MQTT Notification: " + mqtt_custom_msg);
     }
     /// ----------------------------------------------------
-    // 6. CONTROL DE ESTILO DEL RELOJ
+    // 6. CLOCK STYLE CONTROL
     // ----------------------------------------------------
     if (strTopic.endsWith("/cmd/clock_style")) {
         message.trim();
-        int seleccionado = -1;
-        if (message.equalsIgnoreCase("Rainbow Flow"))      seleccionado = 0;
-        else if (message.equalsIgnoreCase("Static Rainbow")) seleccionado = 1;
-        else if (message.equalsIgnoreCase("Solid Neon"))     seleccionado = 2;
-        else if (message.equalsIgnoreCase("Night Fire"))     seleccionado = 3;
-        else if (message.equalsIgnoreCase("Pulse Breath"))   seleccionado = 4;
-        else if (message.equalsIgnoreCase("Matrix Digital")) seleccionado = 5;
-        else if (message.equalsIgnoreCase("Gradient 50%"))   seleccionado = 6;
-        else if (message.equalsIgnoreCase("Gradient 80%"))   seleccionado = 7;
+        int selected = -1;
+        if (message.equalsIgnoreCase("Rainbow Flow"))      selected = 0;
+        else if (message.equalsIgnoreCase("Static Rainbow")) selected = 1;
+        else if (message.equalsIgnoreCase("Solid Neon"))     selected = 2;
+        else if (message.equalsIgnoreCase("Night Fire"))     selected = 3;
+        else if (message.equalsIgnoreCase("Pulse Breath"))   selected = 4;
+        else if (message.equalsIgnoreCase("Matrix Digital")) selected = 5;
+        else if (message.equalsIgnoreCase("Gradient 50%"))   selected = 6;
+        else if (message.equalsIgnoreCase("Gradient 80%"))   selected = 7;
 
-        if (seleccionado != -1) {
-            config.clockEffect = seleccionado;
+        if (selected != -1) {
+            config.clockEffect = selected;
             saveSystemConfig();
             mqttClient.publish((stateTopicPrefix + "clock_style").c_str(), message.c_str(), true);
             if(config.playMode == 2) display->fillScreen(0);
-            Serial.printf("MQTT Estilo ID %d aplicado.\n", seleccionado);
+            Serial.printf("MQTT Estilo ID %d aplicado.\n", selected);
         }
     }
     // ----------------------------------------------------
-    // 7. CONTROL COLOR RELOJ (RUEDA RGB)
+    // 7. CLOCK COLOR CONTROL (RGB WHEEL)
     // ----------------------------------------------------
     if (strTopic.endsWith("/cmd/clock_color/set")) {
         int r, g, b;
@@ -2300,7 +2300,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
         }
     }
     // ----------------------------------------------------
-    // 8. CONTROL COLOR TEXTO (RUEDA RGB)
+    // 8. TEXT COLOR CONTROL (RGB WHEEL)
     // ----------------------------------------------------
     if (strTopic.endsWith("/cmd/text_color/set")) {
         int r, g, b;
@@ -2312,61 +2312,58 @@ void callback(char* topic, byte* payload, unsigned int length) {
     }
 
     // ----------------------------------------------------
-    // 9. BARRA DE NOTIFICACIONES
+    // 9. NOTIFICATION BAR
     // ----------------------------------------------------
     if (config.playMode == 2 && (strTopic.indexOf("temp") != -1 || strTopic.indexOf("weather") != -1 || strTopic.indexOf("notify") != -1)) {
-        dibujarBarraNotificaciones();
+        drawNotificationBar();
     }
 }
 
 void syncMQTTState() {
-    // 1. Verificación inicial: Si no hay MQTT o no está conectado, salimos
+    // 1. Initial check: if MQTT is not enabled or connected, exit
     if (!config.mqtt_enabled || !mqttClient.connected()) return;
 
-    // 2. Definimos las variables necesarias para construir los tópicos
+    // 2. Define the variables needed to build topics
     String technicalID = "retropixel_" + chipID;
     String stateTopicPrefix = "retropixel/" + technicalID + "/state/";
 
-    // 3. Mapeo del modo actual
-    String modoTexto;
+    // 3. Current mode mapping
+    String modeText;
     switch (config.playMode) {
-        case 0:  modoTexto = "GIFs";   break;
-        case 1:  modoTexto = "Texto";  break;
-        case 2:  modoTexto = "Reloj";  break;
-        case 3:  modoTexto = "Arcade"; break;
-        default: modoTexto = "GIFs";   break;
+        case 0:  modeText = "GIFs";   break;
+        case 1:  modeText = "Text";  break;
+        case 2:  modeText = "Clock";  break;
+        case 3:  modeText = "Arcade"; break;
+        default: modeText = "GIFs";   break;
     }
 
 
-    // 4. Preparar nombres de efectos del reloj y brillo
-    String brillo = String(config.brightness);
-    String encendido = config.powerState ? "ON" : "OFF";
-
+    // 4. Prepare clock effect names
     const char* effectNames[] = {"Rainbow Flow", "Static Rainbow", "Solid Neon", "Night Fire", "Pulse Breath", "Matrix Digital", "Gradient 50%", "Gradient 80%"};
     String currentEffectName = "Rainbow Flow";
     if(config.clockEffect >= 0 && config.clockEffect <= 7) {
         currentEffectName = String(effectNames[config.clockEffect]);
     }
     
-    // 5. Función auxiliar para convertir color a formato R,G,B para Home Assistant
+    // 5. Helper function to convert color to R,G,B format for Home Assistant
     auto toRGBStr = [](uint32_t c) {
         return String((c >> 16) & 0xFF) + "," + String((c >> 8) & 0xFF) + "," + String(c & 0xFF);
     };
 
-    // 6. Enviar estados básicos
-    mqttClient.publish((stateTopicPrefix + "mode").c_str(), modoTexto.c_str(), true);
+    // 6. Send basic states
+    mqttClient.publish((stateTopicPrefix + "mode").c_str(), modeText.c_str(), true);
     mqttClient.publish((stateTopicPrefix + "bright").c_str(), String(config.brightness).c_str(), true);
     mqttClient.publish((stateTopicPrefix + "power").c_str(), (config.powerState ? "ON" : "OFF"), true);
     mqttClient.publish((stateTopicPrefix + "text").c_str(), config.slidingText.c_str(), true);
     mqttClient.publish((stateTopicPrefix + "clock_style").c_str(), currentEffectName.c_str(), true);
 
-    // 7. Sincronizar Ruedas de Color (Luces en HA)
+    // 7. Synchronize color wheels (lights in HA)
     mqttClient.publish((stateTopicPrefix + "clock_color").c_str(), "ON", true);
     mqttClient.publish((stateTopicPrefix + "clock_color/set").c_str(), toRGBStr(config.clockColor).c_str(), true);
     mqttClient.publish((stateTopicPrefix + "text_color").c_str(), "ON", true);
     mqttClient.publish((stateTopicPrefix + "text_color/set").c_str(), toRGBStr(config.slidingTextColor).c_str(), true);
     
-    Serial.println("MQTT: Sincronización de estado enviada a HA (Modo: " + modoTexto + ")");
+    Serial.println("MQTT: State synchronization sent to HA (Mode: " + modeText + ")");
 }
 
 // --- TAREAS DUAL CORE ---
@@ -2379,49 +2376,49 @@ void TaskDisplay(void * pvParameters);
 void setup() {
     Serial.begin(115200);
 
-    // --- 1. OBTENER ID ÚNICO (VERSIÓN UNIVERSAL CORE 3.X) ---
-    // Leemos la MAC directamente de los eFuses del hardware (64 bits)
+    // --- 1. GET UNIQUE ID (UNIVERSAL CORE VERSION 3.X) ---
+    // Read the MAC directly from the hardware eFuses (64 bits)
     uint64_t chipid_raw = ESP.getEfuseMac(); 
     
-    // Extraemos los últimos 3 bytes (los últimos 6 caracteres hexadecimales)
-    // Desplazamos 24 bits para obtener la parte final de la MAC
+    // Extract the last 3 bytes (the last 6 hexadecimal characters)
+    // Shift 24 bits to get the final part of the MAC
     uint32_t chipid_num = (uint32_t)(chipid_raw >> 24); 
 
     char mac_str[7];
-    sprintf(mac_str, "%06X", chipid_num); // Convertimos a texto Hexadecimal de 6 cifras
+    sprintf(mac_str, "%06X", chipid_num); // Convert to 6-digit hexadecimal text
     chipID = String(mac_str);
     chipID.toUpperCase();
     
-    Serial.print(">> ID Único del Dispositivo calculado al inicio: ");
+    Serial.print(">> Unique device ID calculated at startup: ");
     Serial.println(chipID);
 
-    // --- 2. SEMÁFORO (MUTEX) ---
+    // --- 2. SEMAPHORE (MUTEX) ---
     sdMutex = xSemaphoreCreateMutex();
     if (sdMutex == NULL) {
-        Serial.println("Error al crear el Semáforo");
+        Serial.println("Error creating semaphore");
     }
        
     if (!SPIFFS.begin(true)) {
-        Serial.println("Error al montar SPIFFS.");
+        Serial.println("Error mounting SPIFFS.");
     }
 
     loadConfig();
 
-    // --- 3. INICIALIZACIÓN DE LA SD --- 
+    // --- 3. SD INITIALIZATION --- 
     SPI.begin(VSPI_SCLK, VSPI_MISO, VSPI_MOSI, SD_CS_PIN);
     if (!SD.begin(SD_CS_PIN)) {
-        Serial.println("Error al montar la tarjeta SD!");
-        sdMontada = false;
+        Serial.println("Error mounting SD card!");
+        sdMounted = false;
         delay(100);
     } else {
-        Serial.println("Tarjeta SD montada correctamente.");
-        sdMontada = true;
+        Serial.println("SD card mounted successfully.");
+        sdMounted = true;
         scanFolders(GIFS_BASE_PATH);
     }   
 
     gif.begin(LITTLE_ENDIAN_PIXELS);
 
-    // --- 4. CONEXIÓN WIFI --- 
+    // --- 4. WIFI CONNECTION --- 
     if (config.device_name[0] == '\0') {
         strncpy(config.device_name, DEVICE_NAME_DEFAULT, sizeof(config.device_name) - 1);
         config.device_name[sizeof(config.device_name) - 1] = '\0'; 
@@ -2429,37 +2426,37 @@ void setup() {
 
     wm.setHostname(config.device_name);
 
-    // CONFIGURACIÓN WM: Hacer que el portal no bloquee el resto del código
+    // WM CONFIGURATION: make the portal non-blocking
     wm.setConfigPortalBlocking(false); 
-    //wm.setConfigPortalTimeout(180); // 3 minutos de espera, luego sigue
+    //wm.setConfigPortalTimeout(180); // Wait 3 minutes, then continue
 
     if (config.WifiOffMode) {
-        // ESCENARIO A: Modo Offline configurado
-        Serial.println("Modo Offline activado. Generando red propia...");
+        // SCENARIO A: Offline mode configured
+        Serial.println("Offline mode enabled. Creating local network...");
         WiFi.mode(WIFI_AP);
         WiFi.softAP("Retro Pixel LED");
-        config.slidingText = "Modo Offline Activo - Conectate a la IP: 192.168.4.1 para usar Retro Pixel LED";
+        config.slidingText = "Offline Mode Active - Connect to IP: 192.168.4.1 to use Retro Pixel LED";
     } else {
-        // ESCENARIO B: Intento Online
+        // SCENARIO B: Online attempt
         WiFi.mode(WIFI_AP_STA); 
-        config.slidingText = "MODO ONLINE - Buscando WiFi...";
+        config.slidingText = "ONLINE MODE - Searching WiFi...";
 
-        // Configuramos el timeout a 3 minutos (180 seg)
+        // Configure the timeout to 3 minutes (180 sec)
         wm.setConfigPortalTimeout(180);
         wm.setConfigPortalBlocking(false);
 
-        // Intentamos conectar
+        // Try to connect
         if (!wm.autoConnect("Retro Pixel LED")) {
-            Serial.println("Portal activo. Esperando configuracion o timeout...");
-            config.slidingText = "Conectate a la red WiFi Retro Pixel LED para configurarlo - IP:192.168.4.1 - Si a los 3 minutos no se ha conectado a una red WiFi se desactivara el AP. Reinicia Retro Pixel LED para que vuelva activar el AP de configuracion WiFi";
+            Serial.println("Portal active. Waiting for configuration or timeout...");
+            config.slidingText = "Connect to the Retro Pixel LED WiFi network to configure it - IP:192.168.4.1 - If no WiFi network is configured within 3 minutes, the AP will be disabled. Restart Retro Pixel LED to enable the WiFi configuration AP again";
         } else {
-            // Si conecta a la primera:
-            Serial.println("Conectado con éxito.");
+            // If it connects on the first try:
+            Serial.println("Connected successfully.");
             config.slidingText = "Retro Pixel LED v" + String(FIRMWARE_VERSION) + " - IP: " + WiFi.localIP().toString();
         }
     }
 
-    // --- 5. INICIALIZACIÓN DE LA MATRIZ LED --- 
+    // --- 5. LED MATRIX INITIALIZATION --- 
     const int FINAL_MATRIX_WIDTH = PANEL_RES_X * config.panelChain;
 
     HUB75_I2S_CFG::i2s_pins pin_config = {
@@ -2475,9 +2472,9 @@ void setup() {
         pin_config          
     );
 
-    // --- 6. APLICACIÓN DE AJUSTES AVANZADOS  ---
+    // --- 6. APPLY ADVANCED SETTINGS  ---
     
-    // 6.1. Velocidad I2S (Mapeo del índice 0-3 a las constantes de la librería)
+    // 6.1. Speed I2S (Map index 0-3 to library constants)
     if (config.i2sSpeed == 0)      matrix_config.i2sspeed = HUB75_I2S_CFG::HZ_8M;
     else if (config.i2sSpeed == 1) matrix_config.i2sspeed = HUB75_I2S_CFG::HZ_10M;
     else if (config.i2sSpeed == 2) matrix_config.i2sspeed = HUB75_I2S_CFG::HZ_16M;
@@ -2485,21 +2482,21 @@ void setup() {
     else matrix_config.i2sspeed = HUB75_I2S_CFG::HZ_10M;
 
     // 6.2. Latch Blanking (Anti-Ghosting)
-    // El rango válido 1-4.
+    // Valid range 1-4.
     matrix_config.latch_blanking = config.latchBlanking;
 
-    // 6.3. Tasa de Refresco Mínima
-    // Si por error viene un 0, forzamos 60Hz.
+    // 6.3. Minimum Refresh Rate
+    // If 0 is received by mistake, force 60 Hz.
     if (config.minRefreshRate < 30) config.minRefreshRate = 60;
     matrix_config.min_refresh_rate = config.minRefreshRate;
 
-    // 6.4. Doble Buffer (Siempre activo para GIFs)
+    // 6.4. Double Buffer (always active for GIFs)
     //matrix_config.double_buff = true;
 
-    // 6.5. Sincronización
+    // 6.5. Synchronization
     matrix_config.clkphase = false;
 
-    // Crear el objeto Display con la nueva configuración
+    // Create the Display object with the new configuration
     display = new MatrixPanel_I2S_DMA(matrix_config);
 
     if (display) { 
@@ -2511,27 +2508,27 @@ void setup() {
             display->fillScreen(display->color565(0, 0, 0));
         } 
 
-        if (!sdMontada) {
-            mostrarMensaje("SD Error!", display->color565(255, 0, 0));
+        if (!sdMounted) {
+            showMessage("SD Error!", display->color565(255, 0, 0));
         } else if (WiFi.status() == WL_CONNECTED) {
-            mostrarMensaje("WiFi OK!", display->color565(0, 255, 0));
+            showMessage("WiFi OK!", display->color565(0, 255, 0));
         } else {
-             mostrarMensaje("AP Mode", display->color565(255, 255, 0));
+             showMessage("AP Mode", display->color565(255, 255, 0));
         }
         
         if (config.playMode == 0) {
-            // Activamos la bandera para que el loop() lo haga en segundo plano.
-            recargarGifsPendiente = true; 
-            Serial.println("Carga de GIFs programada...");
+            // Enable the flag so loop() handles it in the background.
+            pendingGifReload = true; 
+            Serial.println("GIF loading scheduled...");
         }
         delay(1000);
     } else {
-        Serial.println("ERROR: No se pudo asignar memoria para la matriz LED.");
+        Serial.println("ERROR: Could not allocate memory for the LED matrix.");
     }
     
     initTime();
     
-    // --- 7. CONFIGURACIÓN DE RUTAS DEL SERVIDOR WEB ---
+    // --- 7. WEB SERVER ROUTE CONFIGURATION ---
     server.on("/", HTTP_GET, handleRoot);
     server.on("/power", HTTP_GET, handlePower);
     server.on("/save", HTTP_POST, handleSave);
@@ -2542,23 +2539,23 @@ void setup() {
 
     // ESTILO CSS
     server.on("/style.css", HTTP_GET, [](){
-        server.sendHeader("Cache-Control", "max-age=86400"); // Cache de 1 día
-        server.setContentLength(CONTENT_LENGTH_UNKNOWN);     // Avisamos de envío por trozos
-        server.send(200, "text/css", "");                    // Cabecera inicial
-        server.sendContent(getStyle());                      // Enviamos el bloque CSS
-        server.sendContent("");                              // Cerramos el envío
+        server.sendHeader("Cache-Control", "max-age=86400"); // 1-day cache
+        server.setContentLength(CONTENT_LENGTH_UNKNOWN);     // Announce chunked sending
+        server.send(200, "text/css", "");                    // Initial header
+        server.sendContent(getStyle());                      // Send the CSS block
+        server.sendContent("");                              // Close sending
     });
     
-    // RUTAS GESTIÓN DE ARCHIVOS
+    // FILE MANAGEMENT ROUTES
     server.on("/file_manager", HTTP_GET, handleFileManager);
     server.on("/delete", HTTP_POST, handleFileDelete);
     server.on("/create_dir", HTTP_POST, handleCreateDir); 
 
-    // RUTA PARA BATOCERA ---
+    // BATOCERA ROUTE ---
     server.on("/batocera", HTTP_GET, []() {
     if (server.hasArg("s") && server.hasArg("g")) {
-        // A. BLOQUEO: Pausamos para liberar la SD
-        interrumpirReproduccion = true; 
+        // A. LOCK: pause to release the SD
+        interruptPlayback = true; 
         delay(150); 
 
         String s = server.arg("s");
@@ -2566,37 +2563,37 @@ void setup() {
         s.trim(); g.trim();
 
         if (g == "OFF") {
-            // --- EVENTO DE APAGADO ---
-            Serial.println(">>> BATOCERA OFF: Volviendo a Modo GIFs");
-            config.playMode = 0; // Cambiamos al modo (GIFs)
+            // --- POWER-OFF EVENT ---
+            Serial.println(">>> BATOCERA OFF: Returning to GIF mode");
+            config.playMode = 0; // Switch to GIF mode
         } else if (g == "STOP" || g == "") {
-            // --- EVENTO DE SALIDA DE JUEGO ---
-            Serial.println(">>> GAME-STOP: Cargando Logo por defecto");
-            rutaGifArcade = "/batocera/default/_default.gif";
-            config.playMode = 3; // Mantenemos Modo Arcade para ver el logo
+            // --- GAME EXIT EVENT ---
+            Serial.println(">>> GAME-STOP: Loading default logo");
+            arcadeGifPath = "/batocera/default/_default.gif";
+            config.playMode = 3; // Keep Arcade Mode to show the logo
         } else {
-            // --- EVENTO DE INICIO DE JUEGO ---
-            Serial.printf(">>> JUEGO -> Sistema: %s | Juego: %s\n", s.c_str(), g.c_str());
-            rutaGifArcade = buscarEnCache(s, g);
-            config.playMode = 3; // Mantenemos Modo Arcade para ver el logo
+            // --- GAME START EVENT ---
+            Serial.printf(">>> GAME -> System: %s | Game: %s\n", s.c_str(), g.c_str());
+            arcadeGifPath = searchCache(s, g);
+            config.playMode = 3; // Keep Arcade Mode to show the logo
         }
 
-        // B. REANUDACIÓN
-        interrumpirReproduccion = false; 
+        // B. RESUME
+        interruptPlayback = false; 
         server.send(200, "text/plain", "OK");
         } else {
-        server.send(400, "text/plain", "Faltan argumentos");
+        server.send(400, "text/plain", "Missing arguments");
         }
     });
 
-    // REDIRECCIÓN TRAS SUBIDA
+    // REDIRECT AFTER UPLOAD
     server.on("/upload", HTTP_POST, [](){ 
-        // Al terminar de subir, redirige al gestor para que el panel siga en "FILES MODE"
+        // After upload finishes, redirect to the manager so the panel stays in "FILES MODE"
         server.sendHeader("Location", "/file_manager?path=" + currentPath);
         server.send(303); 
     }, handleFileUpload);
     
-    // RUTAS OTA
+    // OTA ROUTES
     server.on("/ota", HTTP_GET, handleOTA);
     server.on("/ota_upload", HTTP_POST, [](){ 
         server.sendHeader("Connection", "close");
@@ -2613,10 +2610,10 @@ void setup() {
         mqttClient.setServer(config.mqtt_host, config.mqtt_port);
         mqttClient.setBufferSize(1024);
         mqttClient.setCallback(callback);
-        Serial.println("MQTT Configurado.");
+        Serial.println("MQTT Configured.");
     }
 
-    // Lanzar la tarea del panel en el Core 1
+    // Launch the panel task on Core 1
     xTaskCreatePinnedToCore(
         TaskDisplay,   
         "TaskDisplay", 
@@ -2627,32 +2624,32 @@ void setup() {
         1              
     );
     
-    Serial.println("Servidor HTTP iniciado.");
+    Serial.println("HTTP server started.");
 }
 
 
-bool modoTemporalActivado = false;
+bool temporaryModeActive = false;
 
 void loop() {
-    // 1. Si el portal de WiFiManager está funcionando
+    // 1. If the WiFiManager portal is running
     if (wm.getConfigPortalActive()) {
         wm.process();
-        modoTemporalActivado = false; // Resetear bandera si el portal está activo
+        temporaryModeActive = false; // Reset flag if the portal is active
     } 
     else {
-        // 2. Gestión de desconexión inteligente (Cuando falla el WiFi o el AP expira)
-        if (WiFi.status() != WL_CONNECTED && !config.WifiOffMode && !modoTemporalActivado) {
+        // 2. Smart disconnection handling (when WiFi fails or the AP expires)
+        if (WiFi.status() != WL_CONNECTED && !config.WifiOffMode && !temporaryModeActive) {
             
-            Serial.println(">> WiFi no detectado. Esperando 3s por seguridad...");
+            Serial.println(">> WiFi not detected. Waiting 3s for safety...");
             delay(3000); 
 
             if (!config.WifiOffMode) { 
-                Serial.println(">> Entrando en Modo Offline temporal.");
+                Serial.println(">> Entering temporary offline mode.");
                 config.WifiOffMode = true; 
-                modoTemporalActivado = true;
-				config.slidingText = "Se ha desactivado el AP de configuracion por no haber configurado la red WiFi. Si quieres configurar la red WiFi REINICIAME!";
+                temporaryModeActive = true;
+				config.slidingText = "The configuration AP was disabled because the WiFi network was not configured. Restart me if you want to configure WiFi.";
 
-                // Forzamos el modo AP_STA para que aunque el portal cierre, el servidor web siga escuchando en la IP del AP o de la última red.
+                // Force AP_STA mode so even if the portal closes, the web server keeps listening on the AP IP or last network IP.
                 WiFi.mode(WIFI_AP_STA);
             }
         }
@@ -2660,143 +2657,143 @@ void loop() {
         // 3. Procesar servidor web
         server.handleClient();
 
-        // 3.1 Reintento de reconexión automática (Background)
-        // Si estamos en modo temporal (porque el router estaba apagado), probamos cada 60s
-        static unsigned long ultimaPruebaWiFi = 0;
-        if (modoTemporalActivado && (millis() - ultimaPruebaWiFi > 60000)) {
-            ultimaPruebaWiFi = millis();
-            Serial.println(">> Reintentando conexión WiFi...");
-            WiFi.begin(); // Intenta conectar con las credenciales que ya conoce
+        // 3.1 Automatic reconnection retry (background)
+        // If temporary mode is active because the router was off, retry every 60 s
+        static unsigned long lastWiFiTest = 0;
+        if (temporaryModeActive && (millis() - lastWiFiTest > 60000)) {
+            lastWiFiTest = millis();
+            Serial.println(">> Retrying WiFi connection...");
+            WiFi.begin(); // Try to connect with already-known credentials
         }
 
 
-        // 3.2 Gestión de éxito en la conexión
+        // 3.2 Successful connection handling
         if (WiFi.status() == WL_CONNECTED) {
-            // Si recuperamos el WiFi, desactivamos el modo temporal y el bloqueo
-            if (modoTemporalActivado) {
-                Serial.println(">> WiFi recuperado con éxito.");
-                modoTemporalActivado = false;
+            // If WiFi is recovered, disable temporary mode and the lock
+            if (temporaryModeActive) {
+                Serial.println(">> WiFi recovered successfully.");
+                temporaryModeActive = false;
             }
         
             if (config.mqtt_enabled) {
-                // 1. Si NO estamos conectados, intentamos conectar
+                // 1. If not connected, try to connect
                 if (!mqttClient.connected()) {
                     reconnectMQTT(); 
                 }
-                // 2. Mantenemos el bucle de escucha
+                // 2. Keep the listener loop running
                 mqttClient.loop();
             }
             
         }
     }
 
-    // 4. Gestión de GIFs
-    if (recargarGifsPendiente) {
+    // 4. GIF management
+    if (pendingGifReload) {
         delay(200); 
-        listarArchivosGif();
-        recargarGifsPendiente = false; 
+        listGifFiles();
+        pendingGifReload = false; 
     }
 }
 
-// --- TAREA PARA EL NÚCLEO 1 (PANEL LED) ---
+// --- TASK FOR CORE 1 (LED PANEL) ---
 void TaskDisplay(void * pvParameters) {
     for (;;) {
-        // 1. Comprobamos si Hay que listar GIFs
-        // Ponemos esto lo primero para que interrumpa cualquier cambio de configuración
-        if (recargarGifsPendiente) {
+        // 1. Check whether GIFs must be listed
+        // Put this first so it can interrupt any configuration change
+        if (pendingGifReload) {
             if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(500))) {
-                listarArchivosGif(); // Esta función ahora limpia pantalla y pone "LISTANDO..."
-                recargarGifsPendiente = false;
+                listGifFiles(); // This function now clears the screen and shows "LISTING..."
+                pendingGifReload = false;
                 xSemaphoreGive(sdMutex);
             }
-            // No hacemos 'continue' aquí para que pueda entrar en el modo GIF inmediatamente después
+            // Do not continue here so GIF mode can run immediately after
         }
 
-        // 2. Si el panel está apagado (Ahorro de Energía Dinámico)
+        // 2. If the panel is off (Dynamic Energy Saving)
         if (config.powerState == false) {
             display->fillScreen(0);
 
-            // Si la frecuencia es distinta de 80MHz, la bajamos
+            // If the frequency is not 80 MHz, lower it
             if (getCpuFrequencyMhz() != 80) {
                 setCpuFrequencyMhz(80);
-                Serial.println(F("[POWER] Modo ahorro: CPU a 80MHz (WiFi Activo)"));
+                Serial.println(F("[POWER] Power saving mode: CPU at 80MHz (WiFi Active)"));
             }
 
             vTaskDelay(pdMS_TO_TICKS(500));
             continue;
         } else {
-            // Si encendemos, restauramos los 240MHz
+            // When turning on, restore 240 MHz
             if (getCpuFrequencyMhz() != 240) {
                 setCpuFrequencyMhz(240);
-                Serial.println(F("[POWER] Modo Performance: CPU a 240MHz"));
+                Serial.println(F("[POWER] Performance mode: CPU at 240MHz"));
             }
 
         }
 
-        // 3. Bloque de Seguridad: Gestor de Archivos o Interrupción Silenciosa
-        // Detenemos los GIFs y mostramos mensaje de "FILES MODE"
-        if (enModoGestion) {
+        // 3. Safety block: file manager or silent interruption
+        // Stop GIF playback and show the "FILES MODE" message
+        if (inFileManagerMode) {
             display->fillScreen(0);
-            display->setTextColor(display->color565(0, 242, 255)); // Cian Cyberpunk
+            display->setTextColor(display->color565(0, 242, 255)); // Cyberpunk cyan
             display->setCursor(177, 7);
             display->print("FILES");
             display->setCursor(180, 17);
             display->print("MODE");
             
-            // Dibujamos una pequeña línea de progreso o adorno Cyberpunk
+            // Draw a small progress line or Cyberpunk accent
             display->drawFastHLine(160, 27, 64, display->color565(255, 0, 100)); 
             
-            vTaskDelay(pdMS_TO_TICKS(500)); // Esperamos medio segundo antes de volver a chequear
-            continue; // Saltamos el resto del código (no se ejecutan GIFs)
+            vTaskDelay(pdMS_TO_TICKS(500)); // Wait half a second before checking again
+            continue; // Skip the rest of the code (GIFs do not run)
         }
 
-        // Interrupción silenciosa para cambios rápidos (Arcade)
-        if (interrumpirReproduccion) {
+        // Silent interruption for fast changes (Arcade)
+        if (interruptPlayback) {
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
 
-        // 4. Ejecución Normal con Semáforo
+        // 4. Normal execution with semaphore
         if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(100))) {
             if (display) { 
         
-                // A) LÓGICA DE RELOJ TEMPORAL (Si está activo)
-                if (modoRelojTemporalActivo) {
-                    // Si el tiempo ha expirado, volvemos a modo normal
-                    if (millis() - tiempoInicioRelojForzado >= DURACION_RELOJ_MS) {
-                        modoRelojTemporalActivo = false;
-                        contadorGifsReproducidos = 0; // Reiniciamos contador
+                // A) TEMPORARY CLOCK LOGIC (If active)
+                if (temporaryClockModeActive) {
+                    // If the time expired, return to normal mode
+                    if (millis() - forcedClockStartTime >= CLOCK_DURATION_MS) {
+                        temporaryClockModeActive = false;
+                        playedGifCount = 0; // Reset counter
                     } else {
-                        ejecutarModoReloj(); // Muestra el reloj
+                        runClockMode(); // Show the clock
                     }
                 } 
 
-                // B) LÓGICA DE MODOS NORMALES
+                // B) NORMAL MODE LOGIC
                 else {
                     switch (config.playMode) {
-                        case 0: // Modo Galería
-                            ejecutarModoGif(); 
+                        case 0: // Gallery Mode
+                            runGifMode(); 
                     
-                            // Si el usuario activó la función, sumamos al contador
+                            // If the user enabled the function, increment the counter
                             if (config.autoClock) {
-                                contadorGifsReproducidos++;
-                                if (contadorGifsReproducidos >= config.clockInterval) {
-                                    modoRelojTemporalActivo = true;
-                                    tiempoInicioRelojForzado = millis();
+                                playedGifCount++;
+                                if (playedGifCount >= config.clockInterval) {
+                                    temporaryClockModeActive = true;
+                                    forcedClockStartTime = millis();
                                 }
                             }
                             break;
                     
-                        case 1: ejecutarModoTexto(); break;
-                        case 2: ejecutarModoReloj(); break;
-                        case 3: ejecutarModoArcade(); break;
+                        case 1: runTextMode(); break;
+                        case 2: runClockMode(); break;
+                        case 3: runArcadeMode(); break;
                     }
                 }
             }
             xSemaphoreGive(sdMutex);
         }
 
-        // Un pequeño respiro de 1ms para que el Watchdog del sistema esté feliz
+        // A small 1 ms pause to keep the system watchdog happy
         vTaskDelay(pdMS_TO_TICKS(1)); 
     }
 }

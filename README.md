@@ -1,353 +1,276 @@
-# ✨ Retro Pixel LED v4.0.0
+# Retro Pixel LED v4.0.0
 
-### **[✈️ Unirse al Grupo de Telegram: Retro Pixel LED](https://t.me/RetroPixelLed)**
+### **[Join the Retro Pixel LED Telegram Group](https://t.me/RetroPixelLed)**
 
-## 💡 Descripción del Proyecto
+## Project Description
 
-**Retro Pixel LED** es un firmware avanzado para dispositivos ESP32 diseñado para controlar matrices de LEDs (como las matrices HUB75 PxP o similares) a través de una interfaz web potente.
-Este sistema permite transformar una matriz LED en un centro de información y arte retro, permitiendo cambiar entre **GIFs animados**, **Texto Deslizante**, **Reloj sincronizado por NTP** o **Arcade sincronizado con Batocera**. La versión **4.0.0** supone una revolución en la experiencia de usuario al introducir el **Sistema de Playlists Dinámicas**, permitiendo cambiar instantáneamente entre colecciones temáticas de GIFs y eliminando los tiempos de espera de indexación.
+**Retro Pixel LED** is advanced firmware for ESP32 devices that control HUB75 LED matrix panels, such as P2.5, P4, and similar RGB matrix panels, through a full web interface.
 
-Existe una versión **Lite** de este proyecto si quieres probarla aquí tienes el enlace al **[GitHub.](https://github.com/fjgordillo86/RetroPixelLED-Lite/tree/main)**
+It turns an LED matrix into a retro information and artwork display with animated GIF playback, scrolling text, an NTP-synchronized clock, Batocera/RetroPie arcade integration, Home Assistant control, and SD card file management.
+
+Version **4.0.0** introduces **dynamic playlists**, allowing instant switching between themed GIF collections without waiting for a full SD card re-index.
+
+A **Lite** version is also available here: [RetroPixelLED-Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite/tree/main).
 
 > [!IMPORTANT]
-> **📂 Listado de GIFs:** En el Modo "Galería de GIFs" si realizamos una lista de reproducción seleccionando "Auto-generar" en el desplegable "Origen de los GIFs" si tenemos carpetas con cientos / miles de GIFs (ej. +3000 archivos), el sistema requiere un tiempo inicial para indexar la lista directamente desde la SD. Si el panel muestra **"LISTANDO GIFs..."**, no es un error ni el sistema se ha bloqueado; está creando el archivo de caché para que la reproducción posterior instantánea. Para una selección de 3000 GIFs este proceso puede tardar de **7 a 9 minutos** dependiendo de la velocidad de tu tarjeta SD. **¡No reinicies el dispositivo durante este proceso!** (Este tiempo solo es requerido cuando realizamos una selección de carpetas a reproducir, despues la reprodución sera inmediata)
+> **GIF listing:** In GIF Gallery mode, when using **Auto-generate** as the GIF source, folders with hundreds or thousands of GIFs require an initial SD card index. If the panel shows **"LISTING GIFs..."**, it is not frozen. It is building the cache file used for fast playback. Indexing roughly 3000 GIFs can take **7 to 9 minutes**, depending on SD card speed. Do not restart the device during this process.
 
 > [!TIP]
-> **📂 ¡Adiós a las esperas!: El Modo Playlist (v4.0.0)** permite cargar listas de GIFs generadas previamente en tu PC. Si seleccionas una Playlist en lugar del modo "Auto-generar", el panel **no necesita indexar la SD**, iniciándose la reproducción de forma **instantánea** incluso con miles de archivos.
-> 
-## 🚀 Novedades de la Versión 4.0.0 (¡Lo nuevo!)
+> **No more waiting:** Playlist mode lets the panel load `.txt` playlists generated on a PC. When a playlist is selected instead of Auto-generate, the panel starts playback instantly, even with thousands of files.
 
-| Característica | Detalle Técnico | Beneficio |
+## What's New in 4.0.0
+
+| Feature | Technical Detail | Benefit |
 | :--- | :--- | :--- |
-| **📜 Dynamic Playlists** | Soporte para archivos `.txt` en la carpeta `/playlists`. | **Cambio de "Canal".** Elige entre listas como "Metal Slug", "Arcade" o "Consolas" al instante desde la Web. |
-| **⚡ Instant Switching** | Interrupción por hardware (`interrumpirReproduccion`) del núcleo de renderizado. | **Corte inmediato.** Al cambiar de modo o lista, el GIF actual se detiene al milisegundo sin esperar a que termine. |
-| **🖥️ PC Playlist Tool** | Script interactivo `.bat` (v2.3) para Windows optimizado. | **Gestión Pro.** Crea listas personalizadas seleccionando carpetas de tu SD en segundos con rutas limpias. |
-| **💾 NVS Persistence** | Guardado de la Playlist activa en la memoria Flash del ESP32. | **Memoria total.** Al reiniciar, el panel recuerda exactamente qué lista o modo estaba reproduciendo. |
-| **🕒 Auto Clock Interv.** | Ciclo de interrupción temporizada configurable. | **Reloj automático.** El panel muestra la hora cada X GIFs sin cambiar de modo manualmente. |
-| **🎨 External CSS** | Migración del estilo visual a un archivo `/style.css` en la SD. | **Web más rápida.** Libera memoria RAM crítica y permite el uso de caché del navegador. |
-| **🌱 Eco-Energy Mode** | Dynamic Frequency Scaling (80/240MHz). | **Menos calor.** El ESP32 reduce su potencia cuando el panel está apagado. |
+| **Dynamic Playlists** | `.txt` playlist support in `/playlists`. | Switch themed GIF collections instantly from the web UI. |
+| **Instant Switching** | Hardware-level playback interruption through `interruptPlayback`. | Mode, playlist, and Batocera changes stop the current GIF immediately. |
+| **PC Playlist Tool** | Optimized interactive Windows `.bat` script. | Create clean ESP32-ready playlists in seconds. |
+| **NVS Persistence** | Active playlist is stored in ESP32 flash memory. | The panel remembers the selected mode or playlist after restart. |
+| **Auto Clock Interval** | Timed interruption cycle. | Show the clock every X GIFs without manually changing mode. |
+| **External CSS** | Web style moved to `/style.css` on the SD card. | Frees RAM and allows browser caching. |
+| **Eco-Energy Mode** | Dynamic frequency scaling between 80 MHz and 240 MHz. | Reduces heat and consumption while the panel is off. |
 
+## Core Features
 
----
-## 🧠 Características Core
+* **Playlist System:** Create playlist text files on the SD card with exact GIF paths and switch between them from the web UI.
+* **Real-Time Interruption:** Web, brightness, mode, playlist, and Batocera changes are applied atomically between ESP32 cores.
+* **Auto Clock Logic:** The panel can interrupt GIF playback every configurable number of GIFs, display the clock for 10 seconds, then resume the gallery.
+* **Smart Web Engine:** Chunked transfer encoding sends large pages and folder lists without exhausting ESP32 RAM.
+* **Smart Energy Management:** CPU speed drops from 240 MHz to 80 MHz when the matrix is off, while WiFi and Home Assistant remain available.
+* **Dual Core Engine:** Core 0 handles WiFi, Web, and MQTT. Core 1 handles GIF decoding and rendering.
+* **True Random Engine:** Uses the ESP32 hardware random generator instead of predictable software randomness.
+* **Infinite GIF List:** Reads GIF paths directly from SD cache files to support very large collections.
+* **Arcade Mode:** Native Batocera/RetroPie integration. The panel changes GIFs according to the selected or launched game.
+* **FileManager Pro:** Upload, delete, and organize GIFs through the web UI without removing the Micro SD card.
+* **SD Mutex:** Protects SD card access between cores.
 
-* **Sistema de Playlists (v4.0.0):** Permite crear archivos de texto en la SD con rutas específicas de GIFs. Desde la interfaz web puedes alternar entre el modo "Auto" (escanea toda la SD) o tus listas personalizadas.
-* **Interrupción en Tiempo Real (v4.0.0):** Gracias al uso de banderas compartidas entre núcleos, cualquier cambio realizado en la web (Brillo, Modo, Playlist o integración con Batocera) se aplica de forma atómica.
-* **Auto Clock Logic (v3.0.4):** Nueva función que permite al panel interrumpir la galería de GIFs cada "X" archivos reproducidos para mostrar el reloj digital durante 10 segundos. Una vez finalizado el tiempo, el panel retoma la galería exactamente donde la dejó.
-* **Smart Web Engine (v3.0.4):** Implementación de transferencia de datos fragmentada (Chunked Transfer Encoding). Esto permite enviar páginas web complejas y listas de carpetas extensas sin agotar la RAM del ESP32, garantizando que la interfaz nunca se corte.
-* **Smart Energy Management:** Cuando la matriz se apaga, el procesador reduce automáticamente su velocidad de **240MHz a 80MHz**. Esto reduce el consumo energético y el estrés térmico del chip, manteniendo el WiFi y Home Assistant siempre activos y listos para responder.
-* **Dual Core Engine:** Separación estricta de tareas. **Núcleo 0:** WiFi, Web y MQTT. **Núcleo 1:** Renderizado y decodificación de GIFs a 60 FPS.
-* **True Random Engine:** Utiliza el generador de números aleatorios por hardware del ESP32. Lee el ruido electromagnético real para que la secuencia de GIFs sea siempre impredecible.
-* **Infinite GIF List:** Nuevo motor de lectura por streaming directo desde SD. ¡Soporta miles de GIFs sin agotar la RAM!
-* **Streaming Engine:** Decodificación en tiempo real directamente desde el archivo `gif_cache.txt`.
-* **Modo Arcade:** Integración nativa con **Batocera/RetroPie**. El panel cambia el GIF según el juego seleccionado en tiempo real.
-* **FileManager Pro:** Gestión de archivos web. Sube, borra o organiza tus GIFs sin sacar la Micro SD.
-* **Sistema Mutex:** Implementación de semáforos para evitar conflictos de lectura en la SD entre núcleos.
+## Bill of Materials
 
----
+Recommended tested components:
 
-## 🛒 Lista de Materiales
+* **Microcontroller:** [ESP32 DevKit V1, 30 pins](https://es.aliexpress.com/item/1005005704190069.html)
+* **LED Matrix Panel:** [P2.5 / P4 RGB Matrix Panel](https://es.aliexpress.com/item/1005007439017560.html)
+* **Card Reader:** [Micro SD SPI Adapter Module](https://es.aliexpress.com/item/1005005591145849.html)
+* **ESP32-to-Panel Board:** [DMDos Board V3 by Mortaca](https://www.mortaca.com/) (optional, no soldering required, includes SD reader)
+* **Power Supply:** 5 V supply, with at least 4 A recommended for 64x32 panels.
 
-Para garantizar la compatibilidad, se recomienda el uso de los componentes probados durante el desarrollo:
+## Installation and Configuration
 
-* **Microcontrolador:** [ESP32 DevKit V1 (30 pines) - AliExpress](https://es.aliexpress.com/item/1005005704190069.html)
-* **Panel LED Matrix (HUB75):** [P2.5 / P4 RGB Matrix Panel - AliExpress](https://es.aliexpress.com/item/1005007439017560.html)
-* **Lector de Tarjetas:** [Módulo Adaptador Micro SD (SPI) - AliExpress](https://es.aliexpress.com/item/1005005591145849.html)
-* **Placa conexión ESP32-Panel LED:** [DMDos Board V3 - Mortaca ](https://www.mortaca.com/) (Opcional, no hay que soldar y tiene lector SD incroporado)
-* **Alimentación:** Fuente de alimentación de 5V (Mínimo 4A recomendado para paneles de 64x32).
+### 1. Wiring
 
----
-## ⚙️ Instalación y Configuración
+If you use a DMDos Board V3, this wiring is already handled and you can skip to the next step.
 
-### 1. 🔌 Conexiones 
-Si utilizas DMDos Board V3 esta parte ya la tienes, salta al siguiente punto.
+#### Micro SD Card Reader (SPI)
 
-#### 📂 Lector de Tarjeta Micro SD (Interfaz SPI)
-| Pin SD | Pin ESP32 | Función |
+| SD Pin | ESP32 Pin | Function |
 | :--- | :--- | :--- |
 | **CS** | GPIO 5 | Chip Select |
 | **CLK** | GPIO 18 | Clock |
 | **MOSI** | GPIO 23 | Master Out Slave In |
 | **MISO** | GPIO 19 | Master In Slave Out |
-| **VCC** | 3.3V | Alimentación |
-| **GND** | GND | GND |
+| **VCC** | 3.3 V | Power |
+| **GND** | GND | Ground |
 
-#### 🖼️ Panel LED RGB (Interfaz HUB75)
-| Pin Panel | Pin ESP32 | Función |
+#### HUB75 RGB LED Panel
+
+| Panel Pin | ESP32 Pin | Function |
 | :--- | :--- | :--- |
-| **R1** | GPIO 25 | Datos Rojo (Superior) |
-| **G1** | GPIO 26 | Datos Verde (Superior) |
-| **B1** | GPIO 27 | Datos Azul (Superior) |
-| **R2** | GPIO 14 | Datos Rojo (Inferior) |
-| **G2** | GPIO 12 | Datos Verde (Inferior) |
-| **B2** | GPIO 13 | Datos Azul (Inferior) |
-| **A** | GPIO 33 | Selección de Fila A |
-| **B** | GPIO 32 | Selección de Fila B |
-| **C** | GPIO 22 | Selección de Fila C |
-| **D** | GPIO 17 | Selección de Fila D |
-| **E** | GND | GND |
+| **R1** | GPIO 25 | Upper red data |
+| **G1** | GPIO 26 | Upper green data |
+| **B1** | GPIO 27 | Upper blue data |
+| **R2** | GPIO 14 | Lower red data |
+| **G2** | GPIO 12 | Lower green data |
+| **B2** | GPIO 13 | Lower blue data |
+| **A** | GPIO 33 | Row select A |
+| **B** | GPIO 32 | Row select B |
+| **C** | GPIO 22 | Row select C |
+| **D** | GPIO 17 | Row select D |
+| **E** | GND | Ground |
 | **CLK** | GPIO 16 | Clock |
 | **LAT** | GPIO 4 | Latch |
-| **OE** | GPIO 15 | Output Enable (Brillo) |
+| **OE** | GPIO 15 | Output Enable / brightness |
 
+### 2. Flash the ESP32
 
-### 2. 🚀 Programar el ESP32
-Ya no es necesario instalar Arduino IDE ni configurar librerías manualmente. Puedes programar tu ESP32 directamente desde el navegador.
+Arduino IDE is no longer required for normal installation. You can flash the ESP32 directly from a compatible browser.
 
-### **[👉 Abrir instalador web RETRO PIXEL LED](https://fjgordillo86.github.io/RetroPixelLED/)**
+### **[Open the Retro Pixel LED web installer](https://fjgordillo86.github.io/RetroPixelLED/)**
 
-**Pasos para la instalación:**
-1. Utiliza un navegador compatible (**Google Chrome** o **Microsoft Edge**).
-2. Conecta tu ESP32 al puerto USB del ordenador.
-3. Haz clic en el botón **"Install"** de la web y selecciona el puerto COM correspondiente.
-4. **IMPORTANTE:** Asegúrate de marcar la casilla **"Erase device"** en el asistente para realizar una limpieza completa de la memoria y evitar errores de fragmentación.
+1. Use **Google Chrome** or **Microsoft Edge**.
+2. Connect the ESP32 to your computer over USB.
+3. Click **Install** and select the correct COM port.
+4. Enable **Erase device** in the installer wizard to fully clean flash memory and avoid fragmentation errors.
 
-> 💡 **¿No reconoce tu ESP32?**
-> Si al pulsar "Install" no aparece ningún puerto COM, es probable que necesites instalar los drivers del chip USB de tu placa:
-> * **Chip CP2102:** [Descargar Drivers Silicon Labs](https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers)
-> * **Chip CH340/CH341:** [Descargar Drivers SparkFun](https://learn.sparkfun.com/tutorials/how-to-install-ch340-drivers/all)
-> * 
-**(IMPORTANTE)** Si decides programarlo desde **Arduino IDE** ten en cuenta lo siguiente.
-Debido a las nuevas funcionalidades, el firmware ocupa **1.236 KB**. Para que las actualizaciones OTA funcionen, es obligatorio configurar el mapa de memoria correctamente en el IDE de Arduino:
+If no COM port appears, install the USB driver for your board:
 
-1. Ve al menú **Herramientas > Partition Scheme**.
-2. Selecciona **"Minimal SPIFFS (Large APPS with OTA)"**.
-3. **Primera carga:** Debe realizarse por **cable USB** para aplicar el nuevo esquema de particiones. Las siguientes podrán ser inalámbricas.
-  
-### 3. 📂 Preparación de la Tarjeta SD
+* **CP2102:** [Silicon Labs drivers](https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers)
+* **CH340/CH341:** [SparkFun CH340 driver guide](https://learn.sparkfun.com/tutorials/how-to-install-ch340-drivers/all)
 
-Es fundamental formatear la tarjeta en **FAT32** y mantener la siguiente estructura:
+When flashing from **Arduino IDE**, the firmware requires the correct partition scheme:
+
+1. Open **Tools > Partition Scheme**.
+2. Select **Minimal SPIFFS (Large APPS with OTA)**.
+3. The first flash must be done over USB so the partition layout is applied. Later updates can be done over OTA.
+
+## SD Card Layout
+
+Format the card as **FAT32** and keep this structure:
 
 ```text
-/ (Raíz de la SD)
-├── gifs/                  <-- Uso exclusivo para el Modo Galeria de GIFs.
-│   ├── Arcade/            <-- GIFs organizados por categorías.
-│   └── Consolas/          <-- GIFs organizados por categorías.
-├── playlists/             <-- Aquí estarán las listas generadas por el script "Generador de Playlists".
-│   ├── Mis Favoritos.txt  <-- Lista .txt.
-│   ├── Metal Slug.txt     <-- Lista .txt.
-│   └── Todos.txt          <-- Lista .txt.
-├── Batocera/              <-- Uso exclusivo para el Modo Arcade.
-│   ├── default/           <-- Generada automáticamente con el Script. (Aquí ira el gif por defecto "_default.gif")
-│   ├── mame/              <-- Generada automáticamente con el Script. GIFs organizados por sistemas
-│   └── neogeo/            <-- Generada automáticamente con el Script. GIFs organizados por sistemas
-├── Generador de Playlists.bat   <-- Script para generar las Playlist.
-├── batocera_cache.txt     <-- Generado automáticamente con el Script. (Índice de rutas - Modo Arcade)
-├── gif_cache.txt          <-- Generado automáticamente (Índice de rutas - Modo Galeria de GIFs)
-└── gif_cache.sig          <-- Generado automáticamente (Firma de validación - Modo Galeria de GIFs)
+/ (SD root)
+├── gifs/                       <-- Used by GIF Gallery mode.
+│   ├── Arcade/                 <-- GIFs organized by category.
+│   └── Consoles/               <-- GIFs organized by category.
+├── playlists/                  <-- Playlists generated by the playlist tool.
+│   ├── My Favorites.txt
+│   ├── Metal Slug.txt
+│   └── All.txt
+├── Batocera/                   <-- Used by Arcade mode.
+│   ├── default/                <-- Contains _default.gif.
+│   ├── mame/                   <-- GIFs organized by system.
+│   └── neogeo/                 <-- GIFs organized by system.
+├── Playlist Generator.bat
+├── batocera_cache.txt          <-- Generated by the arcade script.
+├── gif_cache.txt               <-- Generated by the firmware.
+└── gif_cache.sig               <-- Generated validation signature.
 ```
-### 4. 🌐 Configuración Inicial y Conexión Wi-Fi
 
-Si es la primera vez que usas el dispositivo o si has cambiado de red, el **Retro Pixel LED** entrará en modo de configuración automática:
+## First WiFi Setup
 
-1.  **Conexión al Punto de Acceso:** Busca en tu smartphone o PC una red Wi-Fi llamada `Retro Pixel LED`. (No requiere contraseña).
-2.  **Portal Cautivo:** Una vez conectado, el navegador debería abrirse automáticamente. Si no lo hace, accede a la dirección `192.168.4.1`.
-3.  **Configurar Wi-Fi:** Pulsa en "Configure WiFi", selecciona tu red doméstica, introduce la contraseña y guarda. El ESP32 se reiniciará (si una vez guardada la red wifi elegida no se reinicia el ESP automaticamente habrá que resetearlo de manera manual) y se conectará a tu red local.
+On first boot, or after changing networks, Retro Pixel LED starts a captive configuration portal:
 
+1. Connect to the WiFi network named `Retro Pixel LED`.
+2. The captive portal should open automatically. If not, browse to `192.168.4.1`.
+3. Select your home WiFi, enter the password, and save. The ESP32 restarts and joins your local network.
 
-### 5. 🖥️ Gestión mediante Servidor Web (Web UI)
+## Web UI
 
-Una vez que el dispositivo esté en tu red local, puedes acceder a su panel de control introduciendo su dirección IP en el navegador.
+After the device joins your local network, open its IP address in a browser.
 
-> **💡 Cómo encontrar la IP:** > * Se muestra en el **Monitor Serie** al arrancar y en el propio **Panel LED** tras la primera conexión
+Available controls:
 
-### Funcionalidades Disponibles:
-* **🕹️ Control en Tiempo Real:** Cambia de modo entre **Galería de GIF** - **Reloj** - **Texto Deslizante** - **Arcade** al instante.
-* **☀️ Brillo Inteligente:** Ajusta la intensidad de los LEDs (0-100%).
-* **📁 Explorador de Archivos SD:** Sube, borra o crea carpetas para tus GIFs sin sacar la tarjeta Micro SD.
-* **✍️ Editor de Texto:** Cambia el mensaje de la marquesina, colores y velocidad de desplazamiento.
-* **🏠 Home Assistant:** Manejo de todas las funciones disponibles desde Home Assistant.
-* **🛠️ Actualización OTA:** Instala nuevas versiones del firmware de forma inalámbrica.
+* Real-time mode switching between **GIF Gallery**, **Clock**, **Scrolling Text**, and **Arcade**.
+* LED brightness control from 0 to 100%.
+* SD file browser for uploading, deleting, and organizing GIFs.
+* Scrolling text editor with color and speed controls.
+* Home Assistant integration.
+* OTA firmware update.
 
-### 6. 📖 Cómo usar el Script Generador de Playlists (Windows)
+## Playlist Generator Script (Windows)
 
-El script `Generar_Playlist.bat` (v1.0.1) facilita la creación de colecciones personalizadas sin tocar una sola línea de código. Lo encontrarás en la carpeta "tool" [aquí](https://github.com/fjgordillo86/RetroPixelLED/tree/main/tools).
+The script `Playlist Generator v1.0.1.bat` in the `tools` folder creates playlist files without manually editing paths.
 
-1. **Preparación:** Coloca el archivo `.bat` en la **raíz de tu tarjeta SD**, justo al lado de la carpeta `gifs`.
-2. **Ejecución:** Haz doble clic en el archivo. Se abrirá una ventana de comandos.
-3. **Selección:** - El script listará todas las subcarpetas dentro de `/gifs`.
-   - Introduce los números de las carpetas que quieras incluir en la lista separados por comas (ej: `3,4,10`) o escribe `TODO`.
-4. **Nombre:** Escribe el nombre que quieras para tu lista (ej: `MisFavoritos`). 
-5. **Resultado:** El script creará automáticamente una carpeta llamada `playlists` y guardará dentro el archivo `MisFavoritos.txt` con las rutas corregidas para el ESP32.
-6. **Carga:** Inserta la SD en tu Retro Pixel LED, ve a la interfaz Web y selecciona tu nueva lista en el menú desplegable.
-<img width="514" height="565" alt="Script PlayList" src="https://github.com/user-attachments/assets/3c600615-5539-4430-af7b-26cd219fc7fe" />
+1. Place the `.bat` file at the SD card root, next to the `gifs` folder.
+2. Run the script.
+3. Select GIF folders by typing their numbers separated by commas, or type `ALL`.
+4. Enter the playlist name.
+5. The script creates `/playlists/<name>.txt` with ESP32-ready paths.
+6. Insert the SD card into Retro Pixel LED and select the playlist in the web UI.
 
-### 7. 🕹️ Integración con Batocera (Modo Arcade)
+## Batocera Integration
 
-El **Modo Arcade** es una de las funciones más potentes de esta versión, permitiendo que la matriz LED actúe como una "Marquesina Arcade" dinámica que reacciona en tiempo real al juego que selecciones en tu sistema **Batocera**.
+Arcade Mode turns the LED matrix into a dynamic arcade marquee that reacts to the game selected or launched in Batocera.
 
-### 1. El Concepto de Doble Lógica
-A diferencia del Modo Galería de GIFs (reproducción aleatoria), el Modo Arcade es específico. El sistema no busca un GIF al azar, sino que busca el archivo exacto que corresponde al juego que acabas de lanzar.
+The system does not choose a random GIF in this mode. It searches for the exact GIF matching the launched game. If it is missing, it falls back to the system logo, then to `_default.gif`.
 
-### 2. Flujo de Trabajo y Script de Sincronización ROMS-GIFs
-Para facilitar la gestión, el sistema utiliza el Script **Listar Gifs - Modo Arcade** (disponible en la carpeta `/tools`) que automatiza todo el proceso:
+### Arcade GIF Indexer Script
 
-1.  **Generación de Estructura:** El script escanea tus ROMs y crea automáticamente las carpetas por sistema dentro de `/Batocera/` (ej: `/Batocera/mame/`, etc.).
-2.  **Creación del Índice Maestro:** Genera el archivo `batocera_cache.txt` en la raíz de la SD. Este archivo contiene la ruta exacta de cada juego, permitiendo que el ESP32 no tenga que "navegar" por las carpetas, sino que vaya directo al archivo.
-3.  **Diccionario de Nombres:** Genera el archivo `nombres_roms_batocera.txt`en la misma ubicacion que tengas el script. Este archivo  contiene el listado de todos los nombres de ROMs detectados. 
-    * **¿Para qué sirve?** Sirve de guía para que sepas exactamente qué nombre ponerle a tus archivos GIF. Si tu ROM se llama `mslug2.zip`, el script te indicará que el GIF debe llamarse `mslug2.gif`.
+The Windows script in `tools` prepares the SD card and synchronizes ROM names with GIF names.
 
-### 2.1 🛠️ Cómo usar el Script Listar Gifs - Modo Arcade (Windows .bat)
+1. Connect the Retro Pixel LED SD card to your computer.
+2. Run `Arcade GIF Indexer v1.5.4.bat`.
+3. Enter the SD drive letter, for example `E`.
+4. Enter the Batocera ROM path:
+   * Local path example: `D:\share\roms`
+   * Network path example: `\\192.168.1.112\share\roms`
+5. The script creates folders by system in `/Batocera/`.
+6. It writes a name reference file next to the script so you know which GIF filenames to create.
+7. After copying GIFs into the system folders, run the script again to generate `batocera_cache.txt`.
 
-El script se encuentra en la carpeta `/tools` del repositorio. Es una herramienta automatizada para Windows que prepara y sincroniza tu tarjeta SD en tres fases:
+GIF naming rules:
 
-#### Fase 1: Preparación y Nomenclatura
-1. **Conecta la SD** de tu Retro Pixel LED a tu ordenador.
-2. **Ejecuta el archivo:** Haz doble clic sobre Script `Listar Gifs - Modo Arcade.bat`.
-3. **Configuración de rutas:** El script te preguntará la letra de unidad SD (ej: E) y la ubicación de tu carpeta de ROMs de Batocera. Puedes usar una ruta local o una ruta de red:
-   * **Ruta local:** `ej-> D:\share\roms` (Si tienes el disco de Batocera conectado al PC).
-   * **Ruta de red:** `ej-> \\192.168.1.112\share\roms` (Si accedes vía WiFi/Ethernet).
-4. **Resultado:** El script creará las carpetas por sistema en tu SD y generará el archivo **`nombres_roms_batocera.txt`** en la misma ubicacion que tengas el script. Este archivo es tu guía para saber qué nombre exacto debe tener cada GIF.
-   
-#### Fase 2: Personalización de Assets
-Antes de volver a pasar el script, debes organizar tus archivos:
-* **GIFs de Juegos:** Copia tus GIFs en sus carpetas correspondientes usando los nombres que viste en el `.txt`.
-> [!CAUTION]
-> Si la ROM es `mslug.zip`, el GIF debe ser `mslug.gif`.Cuidado con añadir espacios en blanco al principio o final del nombre ej: `mslug .gif` puede causar que se encuentre el gif.
-  
-* **Logos de Sistema:** Dentro de cada carpeta (ej: `/Batocera/mame/`), añade un GIF llamado **`_logo.gif`**. Este se mostrará en caso de que no tengas el GIF del juego.
-* **GIF por Defecto:** En la carpeta `/Batocera/default/`, si esta no esta creala manuealmente y añade un GIF llamado **`_default.gif`**. Este es el recurso maestro y se mostrará en dos casos:
-    * Si falta tanto el logo del sistema como el GIF específico del juego.
-    * Cuando sales de un juego y vuelves al menú.
-       
-#### Fase 3: Generación del Índice (Caché)
-1.  **Ejecuta el script de nuevo:** Una vez hayas copiado tus GIFs, ejecuta el Script `Listar Gifs - Modo Arcade.bat` otra vez.
-2.  **Sincronización:** El script detectará las coincidencias reales entre tus ROMs y tus GIFs, y generará el archivo maestro **`batocera_cache.txt`**.
-3.  **¡Listo!:** Expulsa la SD y colócala en tu panel LED.
+* If the ROM is `mslug.zip`, the GIF must be `mslug.gif`.
+* Put a system fallback logo named `_logo.gif` inside each system folder.
+* Put the global fallback GIF named `_default.gif` inside `/Batocera/default/`.
 
-> [!CAUTION]
-> **Acceso por Red (Samba):**
-> Si al intentar acceder a la ruta `ej-> \\192.168.1.112\share\roms` Windows te solicita credenciales, utiliza las que trae Batocera por defecto:
-> * **Usuario:** `root`
-> * **Contraseña:** `linux`
+Default Batocera Samba credentials:
 
-> [!TIP]
-> **Sincronización rápida:** Cada vez que añadas nuevos GIFs a las carpetas de `/Batocera/`, vuelve a ejecutar el `.bat` para que el ESP32 reconozca los nuevos archivos en el índice de caché.
+* **Username:** `root`
+* **Password:** `linux`
 
-### 3 🛰️ Configuración de Scripts en Batocera (Comunicación)
+### Batocera Event Scripts
 
-Para que el panel LED cambie automáticamente, debemos instalar tres scripts en tu sistema Batocera. Esto permite que Batocera notifique al ESP32 cada vez que inicias o cierras un juego y apagas el sistema. Estos se encuentran en la carpeta `batocera/scripts`
+Install the three scripts from `batocera/scripts` into Batocera:
 
-#### A. Cómo editar los scripts (Configurar la IP)
-> [!CAUTION]
->  No utilices el Bloc de Notas básico de Windows, ya que cambiaría el formato de fin de línea a Windows (CRLF) y el script dejará de funcionar en Batocera. 
+* `/game-start/pixel_start.sh`
+* `/game-end/pixel_stop.sh`
+* `/quit/pixel_off.sh`
 
-1. **Usa un editor avanzado:** Abre los archivos `pixel_start.sh`, `pixel_stop.sh` y `pixel_off.sh` con **Notepad++**, **VS Code** o **Sublime Text**.
-2. **Cambia la IP:** Busca la línea del comando y sustituye la IP de ejemplo por la IP de tu ESP32.
-3. **Verifica el formato Unix:** En Notepad++, asegúrate de que en la esquina inferior derecha indique **Unix (LF)**. Si dice Windows (CRLF), ve a *Editar > Conversión de fin de línea > Convertir a Formato Unix (LF)*.
-4. **Guarda los cambios.**
-   
-#### B. Ubicación de los Scripts
-Debes colocar los archivos en la carpeta de configuración de EmulationStation. Puedes acceder vía red (Samba) a la siguiente ruta:
-[cite_start]`\\192.168.1.xxx\share\system\configs\emulationstation\scripts` 
+Edit the ESP32 IP address in each script before copying them.
 
-Organiza los archivos en estas subcarpetas:
-* `/game-start/pixel_start.sh` (Se activa al lanzar un juego).
-* `/game-end/pixel_stop.sh` (Se activa al salir al menú).
-* `/quit/pixel_off.sh` (Se activa al apagar Batocera).
+Do not edit the scripts with basic Windows Notepad because it can change line endings to CRLF. Use Notepad++, VS Code, or Sublime Text and keep Unix LF line endings.
 
-#### C. Asignación de Permisos de Ejecución
-  Es **obligatorio** otorgar permisos de ejecución a los archivos mediante una consola SSH (como PuTTY). Ejecuta los siguientes comandos:
+Grant execution permissions over SSH:
 
-  1. **Conéctate por SSH:** Abre PuTTY, introduce la IP de tu Batocera en "Host name" y pincha en "Open".
-     <img width="453" height="444" alt="Putty Configuración" src="https://github.com/user-attachments/assets/2eec17d6-36b0-4ef5-bea6-b4d30aa8ee01" />
+```bash
+chmod +x /userdata/system/configs/emulationstation/scripts/game-start/pixel_start.sh
+chmod +x /userdata/system/configs/emulationstation/scripts/game-end/pixel_stop.sh
+chmod +x /userdata/system/configs/emulationstation/scripts/quit/pixel_off.sh
+```
 
-  2. **Identificate:** Usa el usuario `root` y contraseña `linux`.
-     <img width="661" height="519" alt="Putty login" src="https://github.com/user-attachments/assets/46308f5f-d01a-4495-97f7-e8c07bc3915f" />
+Verify permissions:
 
-  3. **Otorgar permisos a los script:** Copia y pega (clic derecho en PuTTY para pegar) es romendable enviarlos de un en uno:
-     <img width="862" height="516" alt="Putty permisos" src="https://github.com/user-attachments/assets/9d38f2d1-4065-40ad-a100-7651da94c1af" />
-      ```bash
-      # Comandos para otorgar permisos de ejecución
-      chmod +x /userdata/system/configs/emulationstation/scripts/game-start/pixel_start.sh 
-      chmod +x /userdata/system/configs/emulationstation/scripts/game-end/pixel_stop.sh
-      chmod +x /userdata/system/configs/emulationstation/scripts/quit/pixel_off.sh
-      ```
-  4. **Verificar permisos de los script:** Copia y pega (clic derecho en PuTTY para pegar) es romendable enviarlos de un en uno:
-     <img width="871" height="516" alt="Putty verificar permisos" src="https://github.com/user-attachments/assets/863665be-9eb3-42c8-a1a4-06f39dfbb7ba" />
-      ```bash
-      # Comandos para verificar permisos de ejecución:
-      ls -l /userdata/system/configs/emulationstation/scripts/game-start/pixel_start.sh
-      ls -l /userdata/system/configs/emulationstation/scripts/game-end/pixel_stop.sh
-      ls -l /userdata/system/configs/emulationstation/scripts/quit/pixel_off.sh
-      ```
-      **Ejemplo de permisos de ejecución correctos:**-rwxr-xr-x 1 root root 320 ene 10 13:18 /userdata/system/configs/emulationstation/scripts/game-end/pixel_stop.sh
+```bash
+ls -l /userdata/system/configs/emulationstation/scripts/game-start/pixel_start.sh
+ls -l /userdata/system/configs/emulationstation/scripts/game-end/pixel_stop.sh
+ls -l /userdata/system/configs/emulationstation/scripts/quit/pixel_off.sh
+```
 
+### Fixed ESP32 IP Address
 
-### 4. Funcionamiento en Tiempo Real
-* **Inicio de Juego:** El script `pixel_start.sh` envía el sistema y la ROM al ESP32
-* **Cierre de Juego:** El script `pixel_stop.sh` indica al ESP32 que vuelva a mostrar el logo del sistema o el archivo `_default.gif`
-* **Apagado del Sistema:** Al apagar Batocera, se envía un comando final para que el panel LED pase a modo **Galería de GIF**.
-* **Gestión de Errores:** Si no existe el logo o el GIF del juego, o mientras navegas por los menús generales, el panel mostrará siempre el `_default.gif`
+Batocera scripts send commands to one configured IP address. Reserve a fixed IP for the ESP32 in your router DHCP settings so the integration keeps working after router restarts.
 
+## Home Assistant Integration
 
-### 5. Configuración Crítica: IP Fija para el ESP32
+Retro Pixel LED integrates through **MQTT Discovery**. After configuring your MQTT broker in the web UI, the device appears automatically in Home Assistant.
 
-Para que el modo **🕹️ Arcade** de Batocera funcione siempre correctamente, es fundamental que el ESP32 mantenga siempre la misma dirección IP.
+Available entities:
 
-> [!TIP]
-> **Asignar IP fija al ESP32:** > Los scripts de Batocera envían las órdenes (como cambiar el GIF al lanzar un juego) a una dirección IP específica que tú configuras manualmente. Si el router reinicia y le asigna una IP distinta al ESP32, la comunicación se cortará y el panel dejará de actualizarse.
->
-> **¿Cómo hacerlo?**
-> 1. Accede a la configuración de tu router.
-> 2. Busca la sección de **DHCP Estático** o **Asignación de IP por MAC**.
-> 3. Vincula la dirección MAC de tu ESP32 con la IP que hayas escrito en tus scripts (ej: `192.168.1.107`).
-> 4. Dado que cada router es diferente, si tienes dudas busca en Google: *"Cómo asignar IP fija [modelo de tu router]"*.
----
+* `switch.retro_pixel_led_state`: turn the matrix on or off.
+* `select.retro_pixel_led_mode`: select `GIFs`, `Clock`, `Text`, or `Arcade`.
+* `number.retro_pixel_led_brightness`: brightness control from 0 to 255.
+* `select.retro_pixel_led_clock_style`: select one of the clock styles.
+* `light.retro_pixel_led_clock_color`: RGB clock color.
+* `text.retro_pixel_led_display_text`: scrolling text message.
+* `light.retro_pixel_led_text_color`: RGB text color.
 
-## 🏠 Integración Avanzada con Home Assistant
+Weather and notification topics use the device ID:
 
-El panel se integra de forma nativa mediante **MQTT Discovery**. Una vez configurado tu broker MQTT en la interfaz web, el dispositivo aparecerá automáticamente en HA.
+* `retropixel/retropixel_ID/cmd/weather`
+* `retropixel/retropixel_ID/cmd/temp`
+* `retropixel/retropixel_ID/cmd/notify`
 
-### 🎮 Entidades Disponibles
-* **`switch.retro_pixel_led_estado`**: Enciende o apaga la matriz LED (mantenimiento de CPU activo).
-* **`select.retro_pixel_led_modo`**: Selector de modo (`GIFs`, `Reloj`, `Texto`, `Arcade`).
-* **`number.retro_pixel_led_brillo`**: Control de intensidad lumínica (0-255).
-* **`select.retro_pixel_led_estilo_reloj`**: Selección entre los 8 estilos visuales de reloj.
-* **`light.retro_pixel_led_color_reloj`**: Selector de color RGB para el Reloj.
-* **`text.retro_pixel_led_texto_pantalla`**: Envío de mensajes personalizados para el modo marquesina.
-* **`light.retro_pixel_led_color_texto`**: Selector de color RGB para el texto deslizante.
+The ID is the last six characters of the ESP32 MAC address and appears in the serial monitor.
 
-<img width="988" height="557" alt="mqtt" src="https://github.com/user-attachments/assets/c329f342-8f26-48c0-884f-096421b12c2c" />
+### Weather Icon IDs
 
----
-### 🌦️ Dashboard Climático y Notificaciones
-Cuando el modo **Reloj** está activo y MQTT habilitado, el panel reserva la parte superior para mostrar información enviada desde Home Assistant.
-
-#### Diccionario de Iconos (Topic: `retropixel/retropixel_ID/cmd/weather`)
-Envía el ID numérico para mostrar el icono animado correspondiente:
-
-| ID | Estado | Icono Visual |
+| ID | State | Icon |
 | :--- | :--- | :--- |
-| **0** | Despejado / Sol | ☀️ Sol |
-| **1** | Nublado | ☁️ Nube estática |
-| **2** | Lluvia | 🌧️ Nube con lluvia |
-| **3** | Nieve | ❄️ Nieve |
-| **4** | Tormenta | 🌩️ Nube y rayo |
-| **5** | Noche | 🌙 Luna |
-| **6** | Tormenta/ lluvia | ⛈️ Rayos/Lluvia |
-| **7** | Niebla | 🌫️ Neblina |
-| **Default** | Por defecto | ☀️ Sol |
+| **0** | Clear / Sun | Sun |
+| **1** | Cloudy | Cloud |
+| **2** | Rain | Rain cloud |
+| **3** | Snow | Snow |
+| **4** | Storm | Lightning cloud |
+| **5** | Night | Moon |
+| **6** | Thunderstorm rain | Lightning and rain |
+| **7** | Fog | Fog |
+| **Default** | Default | Sun |
 
-#### Icono tiempo (Topic: `retropixel/retropixel_ID/cmd/weather`)
-Envía el valor numérico (ej: `0`) y el panel mostrará automáticamente `☀️` en la esquina superior derecha.
-
-#### Temperatura (Topic: `retropixel/retropixel_ID/cmd/temp`)
-Envía el valor numérico (ej: `22`) y el panel mostrará automáticamente `22°C` en la esquina superior derecha.
-
-#### Notificación (Topic: `retropixel/retropixel_ID/cmd/weather`)
-Envía el texto (ej: `Notificaciones`) y el panel mostrará automáticamente `Notificaciones` en la esquina superior izquierda.
-
-> [!TIP]
-> **ID:** > Tienes remplazar ID por tu ID real (ej 98A7B4). Este lo podras encontrar en el Monitor Serie. El ID son los 6 últimos dígitos de la MAC del ESP32.
----
-
-### 🚀 Ejemplo de Automatización (YAML)
-Mostar en el panel la temperatura y el tiempo (cambia ID por el tuyo):
+### Home Assistant YAML Example
 
 ```yaml
-alias: Actualizar Panel LED - Clima
-description: Envía temperatura e iconos al Retro Pixel LED
+alias: Update Retro Pixel LED Weather
+description: Send temperature and weather icons to Retro Pixel LED
 triggers:
   - entity_id: sensor.aemet_temperature
     trigger: state
@@ -361,75 +284,77 @@ actions:
   - data:
       topic: retropixel/retropixel_ID/cmd/weather
       payload: >
-        {% set estado = states('weather.aemet') %} {% if estado == 'sunny' %} 0
-        {% elif estado == 'cloudy' or estado == 'partlycloudy' %} 1 {% elif
-        estado == 'rainy' or estado == 'pouring' %} 2 {% elif estado == 'snowy'
-        or estado == 'snowy-rainy' %} 3 {% elif estado == 'lightning' %} 4 {%
-        elif estado == 'clear-night' %} 5 {% elif estado == 'lightning-rainy' %}
-        4 {% elif estado == 'fog' %} 7 {% else %} 0 {% endif %}
+        {% set state = states('weather.aemet') %}
+        {% if state == 'sunny' %} 0
+        {% elif state == 'cloudy' or state == 'partlycloudy' %} 1
+        {% elif state == 'rainy' or state == 'pouring' %} 2
+        {% elif state == 'snowy' or state == 'snowy-rainy' %} 3
+        {% elif state == 'lightning' %} 4
+        {% elif state == 'clear-night' %} 5
+        {% elif state == 'lightning-rainy' %} 6
+        {% elif state == 'fog' %} 7
+        {% else %} 0
+        {% endif %}
     action: mqtt.publish
 ```
-### 🚀 Ejemplo de Script (YAML)
-Enviar notificación (cambia ID por el tuyo):
+
+Notification script example:
 
 ```yaml
-alias: Notificaciones - Retro Pixel LED
+alias: Retro Pixel LED Notification
 sequence:
   - data:
       topic: retropixel/retropixel_ID/cmd/notify
-      payload: Notificacion HA
+      payload: Home Assistant notification
     action: mqtt.publish
 mode: single
 icon: mdi:cellphone-sound
 ```
 
-Estos son solo unos ejemplos podrás realizar lo que te imagines, temporizar encendido/apagado a unas horas específicas, cambiar de modo automaticamente cada x tiempo... todo gracias a la potencia y versatilidad que ofrece Home Assistant.
+## Performance Cache
 
----
+The firmware avoids full SD scans on every boot by using a validation signature:
 
-## 🌐 Optimización de Rendimiento (Caché)
-Para evitar que el ESP32 escane toda la tarjeta SD en cada inicio (lo cual es lento), el sistema utiliza un mecanismo de Firma de Validación:
+1. The selected folders are written into a signature file.
+2. If the selected folders have not changed after restart, `gif_cache.txt` is reused.
+3. If the signature changed, the SD card is scanned again and the cache is rebuilt.
 
-El usuario selecciona las carpetas activas en la interfaz web.
-El sistema crea una firma única en gif_cache.sig.
-Si al reiniciar las carpetas seleccionadas no han cambiado, el ESP32 lee directamente las rutas desde gif_cache.txt de forma instantánea.
+## Roadmap
 
+Performance improvements:
 
-## 🛠️ Hoja de Ruta (Roadmap de Optimización)
+* Batocera marquee download and automatic resizing.
+* Binary search for `batocera_cache.txt` and `gif_cache.txt`.
+* Direct SD-to-web streaming in FileManager to remove intermediate RAM buffers.
 
-Para las próximas versiones, el proyecto se centrará en dos niveles de mejora:
+Visual improvements:
 
-### ⚡ Nivel de Optimización (Rendimiento)
-* **Integración Batocera:** Descarga y redimensionado automático de marquesinas
-* **Búsqueda Binaria:** Implementación de algoritmo de búsqueda binaria sobre `batocera_cache.txt` y `gif_cache.txt`. Esto permitirá lanzamientos instantáneos incluso en colecciones con más de 10.000 juegos.
-* **Streaming de SD a Web:** Refactorización del *FileManager* para listar archivos directamente desde la SD al navegador, eliminando por completo el uso de búfer de RAM intermedio.
+* Rotating playlist for Arcade Mode while a game is active.
+* Multiple GIF variants per game, such as `sonic_1.gif` and `sonic_2.gif`.
+* More text sizes.
+* Infrared remote control for power, brightness, and modes.
 
-### 🎨 Nivel Estético (Visual)
-* **Playlist Rotativa:** Cambiar la lógica de "un solo GIF" por una "lista de reproducción" que cambie de GIF cada cierto tiempo mientras el juego está activo.
-* **Variantes Aleatorias:** Soporte para múltiples GIFs por juego (ej: `sonic_1.gif`, `sonic_2.gif`) para añadir dinamismo visual al panel.
-* **📡 Mejoras en la función Text:** Distintos tamaños de letra...
-* **✍️ Control por Infrarrojos (IR):** Soporte para mandos a distancia para control físico (Encendido/Brillo/Modos).
+## Required Libraries
 
+Install these libraries when compiling from Arduino IDE:
 
-## 📚 Librerías Necesarias
+* [ESP32-HUB75-MatrixPanel-I2S-DMA](https://github.com/mrfaptastic/ESP32-HUB75-MatrixPanel-I2S-DMA)
+* [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF)
+* [WiFiManager](https://github.com/tzapu/WiFiManager)
+* [Adafruit GFX Library](https://github.com/adafruit/Adafruit-GFX-Library)
+* [ArduinoJson](https://github.com/bblanchon/ArduinoJson)
 
-En el caso de querer compilar y programar el proyecto dede Arduino IDE correctamente, debes instalar las siguientes librerías. Puedes buscarlas en el Gestor de Librerías de Arduino o descargarlas desde sus repositorios oficiales:
+The **SD** and **FS** libraries are included in the ESP32 Arduino core.
 
-* **[ESP32-HUB75-MatrixPanel-I2S-DMA](https://github.com/mrfaptastic/ESP32-HUB75-MatrixPanel-I2S-DMA)**: Control de alto rendimiento para el panel LED mediante DMA.
-* **[AnimatedGIF](https://github.com/bitbank2/AnimatedGIF)**: Decodificador eficiente para la reproducción de archivos GIF desde la SD.
-* **[WiFiManager](https://github.com/tzapu/WiFiManager)**: Gestión de la conexión Wi-Fi mediante un portal cautivo.
-* **[Adafruit GFX Library](https://github.com/adafruit/Adafruit-GFX-Library)**: Librería base para dibujar texto y formas geométricas.
-* **[ArduinoJson](https://github.com/bblanchon/ArduinoJson)**: Para la gestión de archivos de configuración y comunicación web.
+## License and Credits
 
-> **Nota:** Las librerías **SD** y **FS** ya vienen integradas por defecto en el paquete de placas (core) de ESP32 para Arduino.
+This project is released under the MIT License. See [LICENSE](LICENSE).
 
-## ⚖️ Licencia y Agradecimientos
-Este proyecto se publica bajo la Licencia MIT. Consulta el archivo `LICENSE` para conocer los términos completos.
+Special thanks to:
 
-Agradecimientos especiales a los desarrolladores de:
 * **ESP32-HUB75-MatrixPanel-I2S-DMA**
 * **AnimatedGIF**
 * **WiFiManager**
-* **Comunidad Telegram DMDos** al encontrarla y ver de lo que era capáz DMDos me animé a desarrollar **Retro Pixel LED**.
-* **RpiTeam** por la increíble recopilación de [GIFs.](https://www.neo-arcadia.com/forum/viewtopic.php?t=67065)
-* **joseAveleira** por la idea de las Notificaciones de tiempo en el Reloj. [GitHub](https://github.com/joseAveleira/RelojPixel/tree/main/src)
+* **DMDos Telegram community**
+* **RpiTeam** for the GIF collection: [Neo-Arcadia forum thread](https://www.neo-arcadia.com/forum/viewtopic.php?t=67065)
+* **joseAveleira** for the weather notification idea in the clock: [RelojPixel](https://github.com/joseAveleira/RelojPixel/tree/main/src)

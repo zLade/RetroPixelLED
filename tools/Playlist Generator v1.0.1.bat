@@ -1,28 +1,28 @@
 @echo off
-title Retro Pixel LED - Generador de Playlists (ESTANDAR)
+title Retro Pixel LED - Playlist Generator (STANDARD)
 color 0B
 setlocal enabledelayedexpansion
 
-:: Configuración
+:: Configuration
 set "TARGET_DIR=gifs"
 set "PLAYLIST_DIR=playlists"
 set "ROOT_DIR=%~dp0"
 
 echo ========================================================
-echo   RETRO PIXEL LED - GENERADOR DE PLAYLISTS INTERACTIVO
+echo   RETRO PIXEL LED - INTERACTIVE PLAYLIST GENERATOR
 echo ========================================================
 echo.
 
 if not exist "%TARGET_DIR%" (
     color 0C
-    echo [ERROR] No se encuentra la carpeta '%TARGET_DIR%'.
+    echo [ERROR] Folder not found '%TARGET_DIR%'.
     pause
     exit /b
 )
 
 if not exist "%PLAYLIST_DIR%" mkdir "%PLAYLIST_DIR%"
 
-echo [1] Escaneando carpetas...
+echo [1] Scanning folders...
 echo.
 
 set /a folderCount=0
@@ -33,42 +33,42 @@ for /f "tokens=*" %%D in ('dir /b /ad "%TARGET_DIR%"') do (
 )
 
 echo.
-echo [2] Seleccion de Carpetas
+echo [2] Folder Selection
 echo --------------------------------------------------------
-echo Escribe los numeros separados por comas (ejemplo: 1,3,5)
-echo O escribe "TODO" para incluir todas las carpetas.
+echo Type the numbers separated by commas (example: 1,3,5)
+echo Or type "ALL" to include every folder.
 echo --------------------------------------------------------
-set /p selection="Seleccion: "
+set /p selection="Selection: "
 
 echo.
-set /p playlistName="[3] Nombre de la lista: "
+set /p playlistName="[3] List name: "
 set "OUTPUT_FILE=%ROOT_DIR%%PLAYLIST_DIR%\%playlistName%.txt"
 
 if exist "%OUTPUT_FILE%" del "%OUTPUT_FILE%"
 
 set /a totalGifs=0
 
-if /i "%selection%"=="TODO" (
+if /i "%selection%"=="ALL" (
     set "selection="
     for /L %%i in (1,1,%folderCount%) do (
         if %%i equ 1 (set "selection=%%i") else (set "selection=!selection!,%%i")
     )
 )
 
-:: Bucle de indexación
+:: Indexing loop
 for %%s in (%selection%) do (
     set "currentFolder=!folder[%%s]!"
-    echo  - Indexando: !currentFolder!
+    echo  - Indexing: !currentFolder!
     
-    :: Entramos en la carpeta específica de la carpeta gifs
+    :: Enter the selected folder under gifs
     pushd "%ROOT_DIR%%TARGET_DIR%\!currentFolder!"
     
-    :: Buscamos archivos .gif en esa carpeta y subcarpetas
+    :: Search for .gif files in that folder and subfolders
     for /r %%F in (*.gif) do (
         set "FILE_ABS=%%F"
-        :: Obtenemos la ruta relativa a la carpeta 'gifs'
+        :: Get the path relative to the folder 'gifs'
         set "FILE_REL=!FILE_ABS:%ROOT_DIR%=!"
-        :: Cambiamos barras \ por /
+        :: Change slashes \ to /
         set "FILE_LINE=/!FILE_REL:\=/!"
         
         echo !FILE_LINE!>>"%OUTPUT_FILE%"
@@ -80,8 +80,8 @@ for %%s in (%selection%) do (
 echo.
 color 0A
 echo ========================================================
-echo [EXITO] Playlist '%playlistName%.txt' creada.
-echo Se han indexado !totalGifs! GIFs correctamente.
+echo [SUCCESS] Playlist '%playlistName%.txt' created.
+echo Indexed !totalGifs! GIFs successfully.
 echo ========================================================
 echo.
 pause
