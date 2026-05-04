@@ -282,6 +282,20 @@ Do not edit the script with basic Windows Notepad because it can change line end
 
 Retro Pixel LED integrates through **MQTT Discovery**. After configuring your MQTT broker in the web UI, the device appears automatically in Home Assistant.
 
+## FTP SD Access
+
+Retro Pixel LED can expose the SD card through an optional local FTP server for tools such as WinSCP.
+
+Enable it from **Settings > FTP SD Access**, then connect with:
+
+* **Protocol:** FTP
+* **Host:** the ESP32 IP address, for example `192.168.1.108`
+* **Port:** `21`
+* **Mode:** passive
+* **Username/password:** the values configured in the web UI
+
+FTP is disabled by default. Enable it only on a trusted local network because it gives write access to the SD card. During transfers the panel pauses playback so GIF reads and SD writes do not collide.
+
 Available entities:
 
 * `switch.retro_pixel_led_state`: turn the matrix on or off.

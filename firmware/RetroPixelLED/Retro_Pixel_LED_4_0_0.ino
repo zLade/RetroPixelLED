@@ -58,6 +58,8 @@ const int PANEL_RES_Y = 32;
 
 // Global system variables
 WebServer server(80);
+WiFiServer ftpServer(21);
+WiFiServer ftpDataServer(50009);
 Preferences preferences;
 WiFiManager wm;
 AnimatedGIF gif;
@@ -95,6 +97,17 @@ File FSGifFile;    // Global variable for GIF file handling
 File currentFile; 
 bool pendingGifReload = false; // Indicates whether an SD scan is pending
 SemaphoreHandle_t sdMutex; // Semaphore used to protect SD and SPI bus access
+
+// --- FTP SERVER ---
+WiFiClient ftpClient;
+WiFiClient ftpDataClient;
+bool ftpServerRunning = false;
+bool ftpLoggedIn = false;
+bool ftpUserOk = false;
+String ftpCurrentDir = "/";
+String ftpRenameFrom = "";
+String ftpCommandLine = "";
+const uint16_t FTP_PASSIVE_PORT = 50009;
 
 
 // --- MQTT CONFIGURATION ---
@@ -193,6 +206,10 @@ struct Config {
     int mqtt_port = 1883;
     char mqtt_user[40] = "";
     char mqtt_pass[40] = "";
+    // 7. FTP SD access
+    bool ftp_enabled = false;
+    char ftp_user[24] = "retropixel";
+    char ftp_pass[24] = "retropixel";
     // 7. Advanced hardware settings
     int minRefreshRate;  // Refresh rate
     int latchBlanking;   // For ghosting
@@ -336,6 +353,17 @@ void runGifMode();
 void runTextMode();
 void runClockMode();
 void scanFolders();
+void beginFtpServer();
+void stopFtpServer();
+void handleFtpServer();
+void sendFtpResponse(const String& response);
+String ftpNormalizePath(String path);
+String ftpResolvePath(String path);
+bool ftpOpenDataConnection();
+void ftpCloseDataConnection();
+void ftpSendList(String path, bool namesOnly);
+void ftpStoreFile(String path);
+void ftpRetrieveFile(String path);
 // ====================================================================
 //                      CONFIGURATION HANDLING (PREFERENCES)
 // ====================================================================
@@ -375,6 +403,11 @@ void loadConfig() {
     strncpy(config.mqtt_user, mUser.c_str(), sizeof(config.mqtt_user));
     String mPass = preferences.getString("m_pass", "");
     strncpy(config.mqtt_pass, mPass.c_str(), sizeof(config.mqtt_pass));
+    config.ftp_enabled = preferences.getBool("ftp_en", false);
+    String ftpUser = preferences.getString("ftp_user", "retropixel");
+    strncpy(config.ftp_user, ftpUser.c_str(), sizeof(config.ftp_user));
+    String ftpPass = preferences.getString("ftp_pass", "retropixel");
+    strncpy(config.ftp_pass, ftpPass.c_str(), sizeof(config.ftp_pass));
     
     // device_name: Special read for char array
     String nameStr = preferences.getString("deviceName", DEVICE_NAME_DEFAULT);
@@ -450,6 +483,9 @@ void saveSystemConfig() {
     preferences.putInt("m_port", config.mqtt_port);
     preferences.putString("m_user", config.mqtt_user);
     preferences.putString("m_pass", config.mqtt_pass);
+    preferences.putBool("ftp_en", config.ftp_enabled);
+    preferences.putString("ftp_user", config.ftp_user);
+    preferences.putString("ftp_pass", config.ftp_pass);
     
     preferences.end();
 
@@ -661,8 +697,31 @@ void handleSaveConfig() {
     if (server.hasArg("m_user")) strncpy(config.mqtt_user, server.arg("m_user").c_str(), sizeof(config.mqtt_user) - 1);
     if (server.hasArg("m_pass")) strncpy(config.mqtt_pass, server.arg("m_pass").c_str(), sizeof(config.mqtt_pass) - 1);
 
+    // 6. FTP access to the SD card
+    bool previousFtpEnabled = config.ftp_enabled;
+    config.ftp_enabled = server.hasArg("ftp_en");
+    if (server.hasArg("ftp_user")) {
+        String ftpUser = server.arg("ftp_user");
+        ftpUser.trim();
+        strncpy(config.ftp_user, ftpUser.c_str(), sizeof(config.ftp_user) - 1);
+        config.ftp_user[sizeof(config.ftp_user) - 1] = '\0';
+    }
+    if (server.hasArg("ftp_pass")) {
+        String ftpPass = server.arg("ftp_pass");
+        ftpPass.trim();
+        strncpy(config.ftp_pass, ftpPass.c_str(), sizeof(config.ftp_pass) - 1);
+        config.ftp_pass[sizeof(config.ftp_pass) - 1] = '\0';
+    }
+    if (config.ftp_user[0] == '\0') strncpy(config.ftp_user, "retropixel", sizeof(config.ftp_user) - 1);
+    if (config.ftp_pass[0] == '\0') strncpy(config.ftp_pass, "retropixel", sizeof(config.ftp_pass) - 1);
+
     // 6. Save to FLASH
     saveSystemConfig();
+
+    if (config.ftp_enabled != previousFtpEnabled) {
+        if (config.ftp_enabled) beginFtpServer();
+        else stopFtpServer();
+    }
     
     // 7. MQTT synchronization 
     // Only when not offline, MQTT is enabled, and there is a real connection
@@ -951,7 +1010,16 @@ void handleConfig() {
     html += "<label>Password</label><input type='password' name='m_pass' value='" + String(config.mqtt_pass) + "'></div></div>";
     server.sendContent(html);
 
-    // --- CHUNK 4: BUTTONS AND FOOTER ---
+    // --- CHUNK 4: FTP ---
+    html = "<div class='card'><h2>4. FTP SD Access</h2>";
+    html += "<div class='cb'><label><input type='checkbox' id='ftp_en' name='ftp_en' value='1' onchange='toggleFTP(this.checked)'" + String(config.ftp_enabled ? " checked" : "") + "> Enable FTP for WinSCP</label></div>";
+    html += "<div id='ftp_fields' style='display:" + String(config.ftp_enabled ? "block" : "none") + "; margin-top:10px;'>";
+    html += "<label>FTP Username</label><input type='text' name='ftp_user' value='" + String(config.ftp_user) + "' maxlength='23'>";
+    html += "<label>FTP Password</label><input type='password' name='ftp_pass' value='" + String(config.ftp_pass) + "' maxlength='23'>";
+    html += "<div class='info-box'>Use WinSCP with FTP, host " + WiFi.localIP().toString() + ", port 21, passive mode enabled. FTP gives write access to the SD card on your local network.</div></div></div>";
+    server.sendContent(html);
+
+    // --- CHUNK 5: BUTTONS AND FOOTER ---
     html = "<div class='dual-grid' style='grid-template-columns: repeat(3, 1fr); margin-bottom: 20px;'>";
     html += "<button type='submit' class='btn save-btn'>SAVE</button>";
     html += "<button type='button' class='btn restart-btn' onclick=\"if(confirm('Restart?')) location.href='/restart';\">RESET</button>";
@@ -960,7 +1028,7 @@ void handleConfig() {
 
     html += "<button type='button' class='btn reset-btn' onclick=\"if(confirm('DELETE EVERYTHING?')) location.href='/factory_reset';\">FACTORY RESET</button>";
     html += "<div class='footer'><span>v" + String(FIRMWARE_VERSION) + " - fjgordillo86</span><span>IP: " + WiFi.localIP().toString() + "</span></div>";
-    html += "<script>function toggleMQTT(s){ document.getElementById('mqtt_fields').style.display=s?'block':'none'; }</script></div></body></html>";
+    html += "<script>function toggleMQTT(s){document.getElementById('mqtt_fields').style.display=s?'block':'none';}function toggleFTP(s){document.getElementById('ftp_fields').style.display=s?'block':'none';}</script></div></body></html>";
     
     server.sendContent(html);
     server.sendContent(""); // Finish sending
@@ -2366,6 +2434,325 @@ void syncMQTTState() {
     Serial.println("MQTT: State synchronization sent to HA (Mode: " + modeText + ")");
 }
 
+// ====================================================================
+//                              FTP SERVER
+// ====================================================================
+
+String ftpNormalizePath(String path) {
+    path.replace("\\", "/");
+    if (!path.startsWith("/")) path = ftpCurrentDir + "/" + path;
+
+    std::vector<String> parts;
+    int start = 0;
+    while (start < path.length()) {
+        int slash = path.indexOf('/', start);
+        String part = slash == -1 ? path.substring(start) : path.substring(start, slash);
+        part.trim();
+        if (part.length() > 0 && part != ".") {
+            if (part == "..") {
+                if (!parts.empty()) parts.pop_back();
+            } else {
+                parts.push_back(part);
+            }
+        }
+        if (slash == -1) break;
+        start = slash + 1;
+    }
+
+    String normalized = "/";
+    for (size_t i = 0; i < parts.size(); i++) {
+        normalized += parts[i];
+        if (i < parts.size() - 1) normalized += "/";
+    }
+    return normalized;
+}
+
+String ftpResolvePath(String path) {
+    path.trim();
+    if (path == "" || path == ".") return ftpCurrentDir;
+    return ftpNormalizePath(path);
+}
+
+void sendFtpResponse(const String& response) {
+    if (ftpClient && ftpClient.connected()) {
+        ftpClient.print(response);
+        ftpClient.print("\r\n");
+    }
+}
+
+void beginFtpServer() {
+    if (ftpServerRunning || !config.ftp_enabled) return;
+    ftpServer.begin();
+    ftpDataServer.begin();
+    ftpServerRunning = true;
+    Serial.println("FTP server started on port 21.");
+}
+
+void stopFtpServer() {
+    if (ftpClient) ftpClient.stop();
+    if (ftpDataClient) ftpDataClient.stop();
+    ftpLoggedIn = false;
+    ftpUserOk = false;
+    ftpServerRunning = false;
+    inFileManagerMode = false;
+    Serial.println("FTP server stopped.");
+}
+
+bool ftpOpenDataConnection() {
+    unsigned long start = millis();
+    while (millis() - start < 8000) {
+        ftpDataClient = ftpDataServer.available();
+        if (ftpDataClient && ftpDataClient.connected()) return true;
+        server.handleClient();
+        delay(10);
+    }
+    sendFtpResponse("425 Can't open data connection.");
+    return false;
+}
+
+void ftpCloseDataConnection() {
+    if (ftpDataClient) {
+        ftpDataClient.flush();
+        ftpDataClient.stop();
+    }
+}
+
+void ftpSendList(String path, bool namesOnly) {
+    path = ftpResolvePath(path);
+    sendFtpResponse("150 Opening data connection.");
+    if (!ftpOpenDataConnection()) return;
+
+    if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(8000))) {
+        File dir = SD.open(path);
+        if (dir && dir.isDirectory()) {
+            File entry = dir.openNextFile();
+            while (entry) {
+                String name = String(entry.name());
+                int slash = name.lastIndexOf('/');
+                if (slash >= 0) name = name.substring(slash + 1);
+                if (namesOnly) {
+                    ftpDataClient.print(name + "\r\n");
+                } else {
+                    ftpDataClient.print(entry.isDirectory() ? "drwxr-xr-x 1 owner group " : "-rw-r--r-- 1 owner group ");
+                    ftpDataClient.print(String(entry.size()));
+                    ftpDataClient.print(" Jan 01 00:00 ");
+                    ftpDataClient.print(name);
+                    ftpDataClient.print("\r\n");
+                }
+                entry.close();
+                entry = dir.openNextFile();
+            }
+            dir.close();
+        }
+        xSemaphoreGive(sdMutex);
+    }
+
+    ftpCloseDataConnection();
+    sendFtpResponse("226 Transfer complete.");
+}
+
+void ftpStoreFile(String path) {
+    path = ftpResolvePath(path);
+    sendFtpResponse("150 Opening data connection.");
+    if (!ftpOpenDataConnection()) return;
+
+    inFileManagerMode = true;
+    interruptPlayback = true;
+    gif.close();
+
+    bool ok = false;
+    if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(8000))) {
+        if (SD.exists(path)) SD.remove(path);
+        File out = SD.open(path, FILE_WRITE);
+        if (out) {
+            uint8_t buffer[1024];
+            unsigned long lastData = millis();
+            while (ftpDataClient.connected() || ftpDataClient.available()) {
+                int available = ftpDataClient.available();
+                if (available > 0) {
+                    int len = ftpDataClient.read(buffer, min(available, (int)sizeof(buffer)));
+                    if (len > 0) {
+                        out.write(buffer, len);
+                        lastData = millis();
+                    }
+                } else if (millis() - lastData > 2000) {
+                    break;
+                } else {
+                    delay(1);
+                }
+            }
+            out.close();
+            ok = true;
+            pendingGifReload = true;
+        }
+        xSemaphoreGive(sdMutex);
+    }
+
+    ftpCloseDataConnection();
+    interruptPlayback = false;
+    sendFtpResponse(ok ? "226 Transfer complete." : "451 Local write error.");
+}
+
+void ftpRetrieveFile(String path) {
+    path = ftpResolvePath(path);
+    sendFtpResponse("150 Opening data connection.");
+    if (!ftpOpenDataConnection()) return;
+
+    bool ok = false;
+    if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(8000))) {
+        File in = SD.open(path, FILE_READ);
+        if (in && !in.isDirectory()) {
+            uint8_t buffer[1024];
+            while (in.available() && ftpDataClient.connected()) {
+                size_t len = in.read(buffer, sizeof(buffer));
+                if (len > 0) ftpDataClient.write(buffer, len);
+                delay(1);
+            }
+            ok = true;
+        }
+        if (in) in.close();
+        xSemaphoreGive(sdMutex);
+    }
+
+    ftpCloseDataConnection();
+    sendFtpResponse(ok ? "226 Transfer complete." : "550 File unavailable.");
+}
+
+void handleFtpServer() {
+    if (!config.ftp_enabled) {
+        if (ftpServerRunning) stopFtpServer();
+        return;
+    }
+    if (!ftpServerRunning) beginFtpServer();
+
+    if (!ftpClient || !ftpClient.connected()) {
+        WiFiClient newClient = ftpServer.available();
+        if (newClient) {
+            if (ftpClient) ftpClient.stop();
+            ftpClient = newClient;
+            ftpLoggedIn = false;
+            ftpUserOk = false;
+            ftpCurrentDir = "/";
+            ftpCommandLine = "";
+            sendFtpResponse("220 Retro Pixel LED FTP ready.");
+        }
+        return;
+    }
+
+    while (ftpClient.available()) {
+        char c = ftpClient.read();
+        if (c == '\r') continue;
+        if (c != '\n') {
+            if (ftpCommandLine.length() < 256) ftpCommandLine += c;
+            continue;
+        }
+
+        String line = ftpCommandLine;
+        ftpCommandLine = "";
+        line.trim();
+        if (line == "") continue;
+
+        int space = line.indexOf(' ');
+        String command = space == -1 ? line : line.substring(0, space);
+        String arg = space == -1 ? "" : line.substring(space + 1);
+        command.toUpperCase();
+        arg.trim();
+
+        if (command == "USER") {
+            ftpUserOk = (arg == String(config.ftp_user));
+            sendFtpResponse(ftpUserOk ? "331 Password required." : "530 Invalid user.");
+        } else if (command == "PASS") {
+            ftpLoggedIn = ftpUserOk && (arg == String(config.ftp_pass));
+            sendFtpResponse(ftpLoggedIn ? "230 Login successful." : "530 Login incorrect.");
+        } else if (command == "QUIT") {
+            sendFtpResponse("221 Goodbye.");
+            ftpClient.stop();
+        } else if (!ftpLoggedIn) {
+            sendFtpResponse("530 Please login with USER and PASS.");
+        } else if (command == "SYST") {
+            sendFtpResponse("215 UNIX Type: L8");
+        } else if (command == "FEAT") {
+            sendFtpResponse("211-Features\r\n PASV\r\n SIZE\r\n211 End");
+        } else if (command == "TYPE") {
+            sendFtpResponse("200 Type set.");
+        } else if (command == "MODE" || command == "STRU" || command == "OPTS" || command == "NOOP") {
+            sendFtpResponse("200 OK.");
+        } else if (command == "PWD" || command == "XPWD") {
+            sendFtpResponse("257 \"" + ftpCurrentDir + "\"");
+        } else if (command == "CWD" || command == "XCWD") {
+            String nextDir = ftpResolvePath(arg);
+            if (SD.exists(nextDir)) {
+                ftpCurrentDir = nextDir;
+                sendFtpResponse("250 Directory changed.");
+            } else {
+                sendFtpResponse("550 Directory unavailable.");
+            }
+        } else if (command == "CDUP") {
+            ftpCurrentDir = ftpNormalizePath(ftpCurrentDir + "/..");
+            sendFtpResponse("250 Directory changed.");
+        } else if (command == "PASV") {
+            IPAddress ip = WiFi.status() == WL_CONNECTED ? WiFi.localIP() : WiFi.softAPIP();
+            uint8_t p1 = FTP_PASSIVE_PORT / 256;
+            uint8_t p2 = FTP_PASSIVE_PORT % 256;
+            sendFtpResponse("227 Entering Passive Mode (" + String(ip[0]) + "," + String(ip[1]) + "," + String(ip[2]) + "," + String(ip[3]) + "," + String(p1) + "," + String(p2) + ").");
+        } else if (command == "LIST") {
+            ftpSendList(arg, false);
+        } else if (command == "NLST") {
+            ftpSendList(arg, true);
+        } else if (command == "STOR") {
+            ftpStoreFile(arg);
+        } else if (command == "RETR") {
+            ftpRetrieveFile(arg);
+        } else if (command == "DELE") {
+            String path = ftpResolvePath(arg);
+            bool ok = false;
+            if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(3000))) {
+                ok = SD.remove(path);
+                if (ok) pendingGifReload = true;
+                xSemaphoreGive(sdMutex);
+            }
+            sendFtpResponse(ok ? "250 File deleted." : "550 Delete failed.");
+        } else if (command == "MKD" || command == "XMKD") {
+            String path = ftpResolvePath(arg);
+            bool ok = false;
+            if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(3000))) {
+                ok = SD.mkdir(path);
+                xSemaphoreGive(sdMutex);
+            }
+            sendFtpResponse(ok ? "257 Directory created." : "550 Create directory failed.");
+        } else if (command == "RMD" || command == "XRMD") {
+            String path = ftpResolvePath(arg);
+            bool ok = false;
+            if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(3000))) {
+                ok = SD.rmdir(path);
+                xSemaphoreGive(sdMutex);
+            }
+            sendFtpResponse(ok ? "250 Directory removed." : "550 Remove directory failed.");
+        } else if (command == "RNFR") {
+            ftpRenameFrom = ftpResolvePath(arg);
+            sendFtpResponse(SD.exists(ftpRenameFrom) ? "350 Ready for RNTO." : "550 File unavailable.");
+        } else if (command == "RNTO") {
+            String to = ftpResolvePath(arg);
+            bool ok = false;
+            if (ftpRenameFrom != "" && xSemaphoreTake(sdMutex, pdMS_TO_TICKS(3000))) {
+                ok = SD.rename(ftpRenameFrom, to);
+                if (ok) pendingGifReload = true;
+                xSemaphoreGive(sdMutex);
+            }
+            ftpRenameFrom = "";
+            sendFtpResponse(ok ? "250 Rename successful." : "550 Rename failed.");
+        } else if (command == "SIZE") {
+            String path = ftpResolvePath(arg);
+            File f = SD.open(path, FILE_READ);
+            if (f && !f.isDirectory()) sendFtpResponse("213 " + String(f.size()));
+            else sendFtpResponse("550 File unavailable.");
+            if (f) f.close();
+        } else {
+            sendFtpResponse("502 Command not implemented.");
+        }
+    }
+}
+
 // --- DUAL CORE TASKS ---
 void TaskDisplay(void * pvParameters);
 
@@ -2619,6 +3006,7 @@ void setup() {
     server.onNotFound(notFound);
 
     server.begin();
+    if (config.ftp_enabled) beginFtpServer();
 
     // --- 7. MQTT ---
     if (config.mqtt_enabled) {
@@ -2671,6 +3059,7 @@ void loop() {
 
         // 3. Process web server
         server.handleClient();
+        handleFtpServer();
 
         // 3.1 Automatic reconnection retry (background)
         // If temporary mode is active because the router was off, retry every 60 s

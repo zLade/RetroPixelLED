@@ -9,6 +9,7 @@
 ### Changed
 
 * **Arcade Text Fallback:** Recalbox events now include the readable game title, and Arcade Mode uses it as scrolling text when no exact game GIF is found.
+* **FTP SD Access:** Added an optional built-in FTP server for local WinSCP access to the SD card.
 
 ## [4.0.0] - 2026-03-21
 
