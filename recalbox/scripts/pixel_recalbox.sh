@@ -6,7 +6,7 @@
 SCRIPT_VERSION="pixel_recalbox.sh:v1.0.0"
 
 # IP address of your ESP32 running Retro Pixel LED.
-IP_ESP32="192.168.1.109"
+IP_ESP32="192.168.1.108"
 
 # Recalbox passes the state file path with -statefile. This default is kept
 # for manual runs and older setups.
@@ -15,7 +15,7 @@ CLI_ACTION=""
 CLI_PARAM=""
 
 # Optional config override. Create this file with shell variables such as:
-# IP_ESP32="192.168.1.109"
+# IP_ESP32="192.168.1.108"
 # CURL_TIMEOUT="8"
 CONFIG_FILE="/recalbox/share/system/configs/retropixelled.conf"
 
@@ -100,23 +100,35 @@ system_from_rom_path() {
 send_to_panel() {
   panel_system="$1"
   panel_game="$2"
+  panel_title="$3"
 
   if [ -z "$IP_ESP32" ]; then
     log "ESP32 IP address is empty; request skipped"
     return 1
   fi
 
-  curl -s -G \
-    --connect-timeout "$CURL_TIMEOUT" \
-    --max-time "$CURL_TIMEOUT" \
-    --data-urlencode "s=$panel_system" \
-    --data-urlencode "g=$panel_game" \
-    "http://$IP_ESP32/batocera" > /dev/null 2>&1 &
+  if is_empty_value "$panel_title"; then
+    curl -s -G \
+      --connect-timeout "$CURL_TIMEOUT" \
+      --max-time "$CURL_TIMEOUT" \
+      --data-urlencode "s=$panel_system" \
+      --data-urlencode "g=$panel_game" \
+      "http://$IP_ESP32/batocera" > /dev/null 2>&1 &
+  else
+    curl -s -G \
+      --connect-timeout "$CURL_TIMEOUT" \
+      --max-time "$CURL_TIMEOUT" \
+      --data-urlencode "s=$panel_system" \
+      --data-urlencode "g=$panel_game" \
+      --data-urlencode "t=$panel_title" \
+      "http://$IP_ESP32/batocera" > /dev/null 2>&1 &
+  fi
 }
 
 send_game() {
   game_system="$1"
   game_name="$2"
+  game_title="$3"
 
   if is_empty_value "$game_system" || is_empty_value "$game_name"; then
     log "missing system or game; loading default arcade GIF"
@@ -124,8 +136,8 @@ send_game() {
     return
   fi
 
-  log "game start: system=$game_system game=$game_name"
-  send_to_panel "$game_system" "$game_name"
+  log "game start: system=$game_system game=$game_name title=$game_title"
+  send_to_panel "$game_system" "$game_name" "$game_title"
 }
 
 send_stop() {
@@ -183,14 +195,18 @@ GAME="$(rom_basename_without_extension "$ROM")"
 if is_empty_value "$GAME"; then
   GAME="$(game_title_fallback "$GAME_NAME")"
 fi
+GAME_TITLE="$(game_title_fallback "$GAME_NAME")"
+if is_empty_value "$GAME_TITLE"; then
+  GAME_TITLE="$GAME"
+fi
 
 case "$ACTION" in
   rungame|rundemo)
-    send_game "$SYSTEM" "$GAME"
+    send_game "$SYSTEM" "$GAME" "$GAME_TITLE"
     ;;
   wakeup)
     if [ "$STATE" = "playing" ] || [ "$STATE" = "demo" ]; then
-      send_game "$SYSTEM" "$GAME"
+      send_game "$SYSTEM" "$GAME" "$GAME_TITLE"
     else
       send_stop
     fi

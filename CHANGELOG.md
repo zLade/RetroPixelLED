@@ -6,6 +6,10 @@
 
 * **Recalbox Event Script:** Added a userscript integration that reads `/tmp/es_state.inf` and sends compatible Arcade Mode commands to the existing Retro Pixel LED `/batocera` endpoint.
 
+### Changed
+
+* **Arcade Text Fallback:** Recalbox events now include the readable game title, and Arcade Mode uses it as scrolling text when no exact game GIF is found.
+
 ## [4.0.0] - 2026-03-21
 
 ### Added - Playlist & Instant Response Update

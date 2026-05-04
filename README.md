@@ -171,7 +171,7 @@ The script `Playlist Generator v1.0.1.bat` in the `tools` folder creates playlis
 
 Arcade Mode turns the LED matrix into a dynamic arcade marquee that reacts to the game selected or launched in Batocera.
 
-The system does not choose a random GIF in this mode. It searches for the exact GIF matching the launched game. If it is missing, it falls back to the system logo, then to `_default.gif`.
+The system does not choose a random GIF in this mode. It searches for the exact GIF matching the launched game. If the request includes a display title and no exact game GIF exists, the panel shows that title as scrolling text. Without a display title, it falls back to the system logo, then to `_default.gif`.
 
 ### Arcade GIF Indexer Script
 
@@ -232,7 +232,7 @@ Batocera scripts send commands to one configured IP address. Reserve a fixed IP 
 
 ## Recalbox Integration
 
-Recalbox can use the same Retro Pixel LED Arcade Mode endpoint as Batocera. The firmware route is still named `/batocera`, and it still reads `/batocera_cache.txt`, but the Recalbox script sends compatible `system` and `game` values from `/tmp/es_state.inf`.
+Recalbox can use the same Retro Pixel LED Arcade Mode endpoint as Batocera. The firmware route is still named `/batocera`, and it still reads `/batocera_cache.txt`, but the Recalbox script sends compatible `system`, `game`, and display title values from `/tmp/es_state.inf`.
 
 Use the same SD card GIF layout and naming rules described above:
 
@@ -255,7 +255,7 @@ The event filter in the filename follows the official Recalbox userscript syntax
 Edit the ESP32 IP address directly in the script:
 
 ```bash
-IP_ESP32="192.168.1.109"
+IP_ESP32="192.168.1.108"
 ```
 
 You can also keep the script unchanged and create this optional Recalbox config file:
@@ -265,13 +265,13 @@ nano /recalbox/share/system/configs/retropixelled.conf
 ```
 
 ```bash
-IP_ESP32="192.168.1.109"
+IP_ESP32="192.168.1.108"
 CURL_TIMEOUT="8"
 ```
 
 How it maps Recalbox events:
 
-* `rungame`, `rundemo`: sends the ROM folder system and the ROM filename without extension to Retro Pixel LED.
+* `rungame`, `rundemo`: sends the ROM folder system, the ROM filename without extension, and the readable game title to Retro Pixel LED.
 * `wakeup`: sends the current game again only if Recalbox reports `State=playing` or `State=demo`; otherwise sends `STOP`.
 * `endgame`, `enddemo`, `systembrowsing`, `start`, `runkodi`, `endkodi`, `sleep`, `relaunch`: sends `STOP`, so the panel loads the default arcade GIF.
 * `stop`, `shutdown`, `reboot`, `quit`: sends `OFF`, so the panel returns to normal GIF mode.

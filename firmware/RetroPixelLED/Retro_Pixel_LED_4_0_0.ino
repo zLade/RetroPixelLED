@@ -2560,7 +2560,9 @@ void setup() {
 
         String s = server.arg("s");
         String g = server.arg("g");
-        s.trim(); g.trim();
+        String t = server.hasArg("t") ? server.arg("t") : "";
+        s.trim(); g.trim(); t.trim();
+        if (t.length() > 100) t = t.substring(0, 100);
 
         if (g == "OFF") {
             // --- POWER-OFF EVENT ---
@@ -2574,8 +2576,21 @@ void setup() {
         } else {
             // --- GAME START EVENT ---
             Serial.printf(">>> GAME -> System: %s | Game: %s\n", s.c_str(), g.c_str());
-            arcadeGifPath = searchCache(s, g);
-            config.playMode = 3; // Keep Arcade Mode to show the logo
+            String gameGifPath = runSearch(s, g, "00");
+
+            if (gameGifPath != "") {
+                arcadeGifPath = selectRandomVariant(gameGifPath);
+                config.playMode = 3;
+                Serial.print(">>> GAME MATCH: "); Serial.println(arcadeGifPath);
+            } else if (t != "") {
+                Serial.printf(">>> GAME GIF MISSING: scrolling text fallback [%s]\n", t.c_str());
+                config.slidingText = t;
+                if (display) marqueeXPos = display->width();
+                config.playMode = 1;
+            } else {
+                arcadeGifPath = searchCache(s, g);
+                config.playMode = 3; // Keep Arcade Mode to show the fallback logo
+            }
         }
 
         // B. RESUME
