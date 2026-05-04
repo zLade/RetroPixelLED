@@ -195,8 +195,11 @@ case "$ACTION" in
       send_stop
     fi
     ;;
-  endgame|enddemo|systembrowsing|gamelistbrowsing|start|runkodi|endkodi|sleep|relaunch)
+  endgame|enddemo|systembrowsing|start|runkodi|endkodi|sleep|relaunch)
     send_stop
+    ;;
+  gamelistbrowsing)
+    log "ignored browsing event: $ACTION"
     ;;
   stop|shutdown|reboot|quit)
     send_off
