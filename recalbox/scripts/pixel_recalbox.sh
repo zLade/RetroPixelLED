@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 # Retro Pixel LED integration for Recalbox EmulationStation events.
 # Copy this file to /recalbox/share/userscripts and edit IP_ESP32.
@@ -8,9 +8,11 @@ SCRIPT_VERSION="pixel_recalbox.sh:v1.0.0"
 # IP address of your ESP32 running Retro Pixel LED.
 IP_ESP32="192.168.1.109"
 
-# Recalbox writes the current EmulationStation event here before running
-# userscripts.
+# Recalbox passes the state file path with -statefile. This default is kept
+# for manual runs and older setups.
 STATE_FILE="/tmp/es_state.inf"
+CLI_ACTION=""
+CLI_PARAM=""
 
 # Optional config override. Create this file with shell variables such as:
 # IP_ESP32="192.168.1.109"
@@ -21,7 +23,7 @@ CONFIG_FILE="/recalbox/share/system/configs/retropixelled.conf"
 CURL_TIMEOUT="2"
 
 if [ -f "$CONFIG_FILE" ]; then
-  # shellcheck disable=SC1090
+  # shellcheck source=/dev/null
   . "$CONFIG_FILE"
 fi
 
@@ -30,33 +32,73 @@ log() {
 }
 
 get_val() {
+  if [ ! -f "$STATE_FILE" ]; then
+    return 0
+  fi
+
   grep "^$1=" "$STATE_FILE" | cut -d'=' -f2- | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
 }
 
-rom_basename_without_extension() {
-  local rom_path="$1"
-  local raw_name
+to_lower() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
 
+is_empty_value() {
+  [ -z "$1" ] || [ "$1" = "null" ]
+}
+
+parse_args() {
+  while [ "$#" -gt 0 ]; do
+    key="$1"
+    shift
+
+    case "$key" in
+      -action)
+        if [ "$#" -gt 0 ]; then
+          CLI_ACTION="$1"
+          shift
+        fi
+        ;;
+      -statefile)
+        if [ "$#" -gt 0 ]; then
+          STATE_FILE="$1"
+          shift
+        fi
+        ;;
+      -param)
+        if [ "$#" -gt 0 ]; then
+          CLI_PARAM="$1"
+          shift
+        fi
+        ;;
+    esac
+  done
+}
+
+rom_basename_without_extension() {
+  rom_path="$1"
   raw_name="${rom_path##*/}"
   raw_name="${raw_name%.*}"
-  raw_name="${raw_name//\\/}"
 
-  printf '%s' "$raw_name"
+  printf '%s' "$raw_name" | sed 's/\\//g'
 }
 
 game_title_fallback() {
-  local title="$1"
+  title="$1"
 
   # Remove common collection numbering such as "001 Sonic".
   title="$(printf '%s' "$title" | sed 's/^[0-9][0-9][0-9][[:space:]]*//')"
-  title="${title//\\/}"
 
-  printf '%s' "$title"
+  printf '%s' "$title" | sed 's/\\//g'
+}
+
+system_from_rom_path() {
+  printf '%s' "$1" | sed -n 's#.*[/\\]roms[/\\]\([^/\\]*\)[/\\].*#\1#p'
 }
 
 send_to_panel() {
-  local system="$1"
-  local game="$2"
+  panel_system="$1"
+  panel_game="$2"
 
   if [ -z "$IP_ESP32" ]; then
     log "ESP32 IP address is empty; request skipped"
@@ -66,23 +108,23 @@ send_to_panel() {
   curl -s -G \
     --connect-timeout "$CURL_TIMEOUT" \
     --max-time "$CURL_TIMEOUT" \
-    --data-urlencode "s=$system" \
-    --data-urlencode "g=$game" \
+    --data-urlencode "s=$panel_system" \
+    --data-urlencode "g=$panel_game" \
     "http://$IP_ESP32/batocera" > /dev/null 2>&1 &
 }
 
 send_game() {
-  local system="$1"
-  local game="$2"
+  game_system="$1"
+  game_name="$2"
 
-  if [ -z "$system" ] || [ -z "$game" ]; then
+  if is_empty_value "$game_system" || is_empty_value "$game_name"; then
     log "missing system or game; loading default arcade GIF"
     send_to_panel "STOP" "STOP"
     return
   fi
 
-  log "game start: system=$system game=$game"
-  send_to_panel "$system" "$game"
+  log "game start: system=$game_system game=$game_name"
+  send_to_panel "$game_system" "$game_name"
 }
 
 send_stop() {
@@ -95,47 +137,67 @@ send_off() {
   send_to_panel "OFF" "OFF"
 }
 
+parse_args "$@"
+
 if [ ! -f "$STATE_FILE" ]; then
-  log "$STATE_FILE not found"
-  exit 0
+  log "$STATE_FILE not found; using launch arguments only"
 fi
 
-ACTION="$(get_val "Action")"
+STATE_ACTION="$(to_lower "$(get_val "Action")")"
+ACTION="$(to_lower "$CLI_ACTION")"
+if is_empty_value "$ACTION"; then
+  ACTION="$STATE_ACTION"
+fi
+if ! is_empty_value "$STATE_ACTION" && [ "$STATE_ACTION" != "$ACTION" ]; then
+  log "state action mismatch: cli=$ACTION state=$STATE_ACTION"
+fi
+
+ACTION_PARAM="$CLI_PARAM"
+if is_empty_value "$ACTION_PARAM"; then
+  ACTION_PARAM="$(get_val "ActionData")"
+fi
+
+ROM="$ACTION_PARAM"
+if is_empty_value "$ROM"; then
+  ROM="$(get_val "GamePath")"
+fi
 GAME_NAME="$(get_val "Game")"
-ROM="$(get_val "GamePath")"
 SYSTEM_ID="$(get_val "SystemId")"
 SYSTEM_NAME="$(get_val "System")"
-ACTION="$(printf '%s' "$ACTION" | tr '[:upper:]' '[:lower:]')"
+STATE="$(to_lower "$(get_val "State")")"
 
 # SystemId is the Recalbox short id and normally matches the ROM folder
 # used by the Retro Pixel LED Batocera cache, for example snes or neogeo.
-SYSTEM="$SYSTEM_ID"
-if [ -z "$SYSTEM" ] || [ "$SYSTEM" = "null" ]; then
+SYSTEM="$(system_from_rom_path "$ROM")"
+if is_empty_value "$SYSTEM"; then
+  SYSTEM="$SYSTEM_ID"
+fi
+if is_empty_value "$SYSTEM"; then
   SYSTEM="$SYSTEM_NAME"
 fi
 
 # The firmware cache is built from ROM names, so GamePath is preferred over
 # the display title from gamelist metadata.
 GAME="$(rom_basename_without_extension "$ROM")"
-if [ -z "$GAME" ] || [ "$GAME" = "null" ]; then
+if is_empty_value "$GAME"; then
   GAME="$(game_title_fallback "$GAME_NAME")"
 fi
 
 case "$ACTION" in
-  rungame)
+  rungame|rundemo)
     send_game "$SYSTEM" "$GAME"
     ;;
   wakeup)
-    if [ -n "$SYSTEM" ] && [ "$SYSTEM" != "null" ] && [ -n "$GAME" ] && [ "$GAME" != "null" ]; then
+    if [ "$STATE" = "playing" ] || [ "$STATE" = "demo" ]; then
       send_game "$SYSTEM" "$GAME"
     else
       send_stop
     fi
     ;;
-  endgame|systembrowsing|gamelistbrowsing|start|runkodi|endkodi)
+  endgame|enddemo|systembrowsing|gamelistbrowsing|start|runkodi|endkodi|sleep|relaunch)
     send_stop
     ;;
-  stop|shutdown|reboot)
+  stop|shutdown|reboot|quit)
     send_off
     ;;
   *)

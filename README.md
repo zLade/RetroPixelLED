@@ -246,9 +246,11 @@ Install the script from `recalbox/scripts` into Recalbox:
 
 ```bash
 mkdir -p /recalbox/share/userscripts
-cp pixel_recalbox.sh /recalbox/share/userscripts/pixel_recalbox.sh
-chmod +x /recalbox/share/userscripts/pixel_recalbox.sh
+cp pixel_recalbox.sh "/recalbox/share/userscripts/pixel_recalbox[rungame,rundemo,endgame,enddemo,systembrowsing,gamelistbrowsing,start,stop,shutdown,reboot,quit,relaunch,sleep,wakeup].sh"
+chmod +x "/recalbox/share/userscripts/pixel_recalbox[rungame,rundemo,endgame,enddemo,systembrowsing,gamelistbrowsing,start,stop,shutdown,reboot,quit,relaunch,sleep,wakeup].sh"
 ```
+
+The event filter in the filename follows the official Recalbox userscript syntax and avoids running the script for unrelated events. You can keep a simpler `pixel_recalbox.sh` filename, but Recalbox will then call it for every EmulationStation event.
 
 Edit the ESP32 IP address directly in the script:
 
@@ -269,10 +271,10 @@ CURL_TIMEOUT="2"
 
 How it maps Recalbox events:
 
-* `rungame`: sends `SystemId` and the ROM filename without extension to Retro Pixel LED.
-* `wakeup`: sends the current game again if Recalbox provides one, otherwise sends `STOP`.
-* `endgame`, `systembrowsing`, `gamelistbrowsing`, `start`, `runkodi`, `endkodi`: sends `STOP`, so the panel loads the default arcade GIF.
-* `stop`, `shutdown`, `reboot`: sends `OFF`, so the panel returns to normal GIF mode.
+* `rungame`, `rundemo`: sends the ROM folder system and the ROM filename without extension to Retro Pixel LED.
+* `wakeup`: sends the current game again only if Recalbox reports `State=playing` or `State=demo`; otherwise sends `STOP`.
+* `endgame`, `enddemo`, `systembrowsing`, `gamelistbrowsing`, `start`, `runkodi`, `endkodi`, `sleep`, `relaunch`: sends `STOP`, so the panel loads the default arcade GIF.
+* `stop`, `shutdown`, `reboot`, `quit`: sends `OFF`, so the panel returns to normal GIF mode.
 
 Do not edit the script with basic Windows Notepad because it can change line endings to CRLF. Use Notepad++, VS Code, or Sublime Text and keep Unix LF line endings.
 
