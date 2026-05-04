@@ -16,11 +16,12 @@ CLI_PARAM=""
 
 # Optional config override. Create this file with shell variables such as:
 # IP_ESP32="192.168.1.109"
-# CURL_TIMEOUT="2"
+# CURL_TIMEOUT="8"
 CONFIG_FILE="/recalbox/share/system/configs/retropixelled.conf"
 
-# Keep requests short so EmulationStation is never blocked for long.
-CURL_TIMEOUT="2"
+# Keep the request bounded. The curl call runs in the background, and some
+# ESP32/network combinations need more than two seconds to answer.
+CURL_TIMEOUT="8"
 
 if [ -f "$CONFIG_FILE" ]; then
   # shellcheck source=/dev/null

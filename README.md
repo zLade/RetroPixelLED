@@ -266,7 +266,7 @@ nano /recalbox/share/system/configs/retropixelled.conf
 
 ```bash
 IP_ESP32="192.168.1.109"
-CURL_TIMEOUT="2"
+CURL_TIMEOUT="8"
 ```
 
 How it maps Recalbox events:
