@@ -230,6 +230,52 @@ ls -l /userdata/system/configs/emulationstation/scripts/quit/pixel_off.sh
 
 Batocera scripts send commands to one configured IP address. Reserve a fixed IP for the ESP32 in your router DHCP settings so the integration keeps working after router restarts.
 
+## Recalbox Integration
+
+Recalbox can use the same Retro Pixel LED Arcade Mode endpoint as Batocera. The firmware route is still named `/batocera`, and it still reads `/batocera_cache.txt`, but the Recalbox script sends compatible `system` and `game` values from `/tmp/es_state.inf`.
+
+Use the same SD card GIF layout and naming rules described above:
+
+* Put arcade GIFs in `/Batocera/<system>/`.
+* Keep `_logo.gif` as the system fallback and `/Batocera/default/_default.gif` as the global fallback.
+* Generate `batocera_cache.txt` with the Arcade GIF Indexer. You can point the ROM path to your Recalbox `share/roms` folder.
+
+### Recalbox Event Script
+
+Install the script from `recalbox/scripts` into Recalbox:
+
+```bash
+mkdir -p /recalbox/share/userscripts
+cp pixel_recalbox.sh /recalbox/share/userscripts/pixel_recalbox.sh
+chmod +x /recalbox/share/userscripts/pixel_recalbox.sh
+```
+
+Edit the ESP32 IP address directly in the script:
+
+```bash
+IP_ESP32="192.168.1.109"
+```
+
+You can also keep the script unchanged and create this optional Recalbox config file:
+
+```bash
+nano /recalbox/share/system/configs/retropixelled.conf
+```
+
+```bash
+IP_ESP32="192.168.1.109"
+CURL_TIMEOUT="2"
+```
+
+How it maps Recalbox events:
+
+* `rungame`: sends `SystemId` and the ROM filename without extension to Retro Pixel LED.
+* `wakeup`: sends the current game again if Recalbox provides one, otherwise sends `STOP`.
+* `endgame`, `systembrowsing`, `gamelistbrowsing`, `start`, `runkodi`, `endkodi`: sends `STOP`, so the panel loads the default arcade GIF.
+* `stop`, `shutdown`, `reboot`: sends `OFF`, so the panel returns to normal GIF mode.
+
+Do not edit the script with basic Windows Notepad because it can change line endings to CRLF. Use Notepad++, VS Code, or Sublime Text and keep Unix LF line endings.
+
 ## Home Assistant Integration
 
 Retro Pixel LED integrates through **MQTT Discovery**. After configuring your MQTT broker in the web UI, the device appears automatically in Home Assistant.

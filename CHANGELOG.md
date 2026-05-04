@@ -1,5 +1,11 @@
 # Changelog - Retro Pixel LED
 
+## [Unreleased]
+
+### Added
+
+* **Recalbox Event Script:** Added a userscript integration that reads `/tmp/es_state.inf` and sends compatible Arcade Mode commands to the existing Retro Pixel LED `/batocera` endpoint.
+
 ## [4.0.0] - 2026-03-21
 
 ### Added - Playlist & Instant Response Update
