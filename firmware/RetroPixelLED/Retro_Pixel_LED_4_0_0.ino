@@ -2,7 +2,6 @@
 #include <WebServer.h>
 #include <Preferences.h>
 #include <SPIFFS.h>
-#include <time.h>
 #include <vector>
 #include <algorithm>
 #include <Update.h>       // Library for OTA functionality
@@ -21,7 +20,6 @@
 #define FIRMWARE_VERSION "4.0.0" // Adds support for selecting different GIF playlists
 #define PREF_NAMESPACE "pixel_config"
 #define DEVICE_NAME_DEFAULT "RetroPixel-Default"
-#define TZ_STRING_SPAIN "CET-1CEST,M3.5.0,M10.5.0/3" // Safe default TZ string
 #define GIFS_BASE_PATH "/gifs" // Base directory for GIFs
 #define GIF_CACHE_FILE "/gif_cache.txt" // File used to store the GIF index
 #define GIF_CACHE_SIG "/gif_cache.sig" // Signature file
@@ -76,15 +74,10 @@ unsigned long gifCachePosition = 0; // Stores the cursor position in the text fi
 bool hasGifsInCache = false;        // Simple flag to know whether there is content
 int x_offset = 0; // Offset for GIF centering
 int y_offset = 0;
-int playedGifCount = 0;
-unsigned long forcedClockStartTime = 0;
-bool temporaryClockModeActive = false;
-const long CLOCK_DURATION_MS = 10000;  // Show the clock for 10 seconds
 
 // Mode variables
 int marqueeXPos = 0;
 unsigned long lastScrollTime = 0;
-const char* ntpServer = "pool.ntp.org";
 
 // Global variable for the Batocera GIF path
 String currentGame = "default";
@@ -114,11 +107,6 @@ const uint16_t FTP_PASSIVE_PORT = 50009;
 // --- MQTT CONFIGURATION ---
 String chipID; // Stores the MAC-based ID
 
-// Dynamic data from MQTT
-String mqtt_temp = "--";    // Temperature (e.g.: "22°")
-int mqtt_weather_icon = 0;  // 0:Sun, 1:Rain, 2:Clouds, 3:Snow...
-String mqtt_custom_msg = ""; // Notification
-
 // Clients
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
@@ -136,38 +124,8 @@ const char* topic_cmd_power = "retropixel/cmd/power";  // Turn the switch on/off
 const char* topic_state_power = "retropixel/state/power";  // Report switch state
 const char* topic_cmd_text = "retropixel/cmd/text";   // Receive a new message
 const char* topic_state_text = "retropixel/state/text"; // Report current message to HA
-const char* topic_cmd_clock_style = "retropixel/cmd/clock_style"; // Receive clock style
-const char* topic_state_clock_style = "retropixel/state/clock_style"; //Report clock style
-const char* topic_cmd_clock_color = "retropixel/cmd/clock_color"; // Receive clock color
-const char* topic_state_clock_color = "retropixel/state/clock_color"; //Report clock color
 const char* topic_cmd_text_color = "retropixel/cmd/text_color"; // Receive text color
 const char* topic_state_text_color = "retropixel/state/text_color"; //Report text color
-
-// 8x8 weather icons (1 bit per pixel)
-const unsigned char icon_sun[]    = {0x00, 0x3c, 0x7e, 0x7e, 0x7e, 0x7e, 0x3c, 0x00};
-const unsigned char icon_cloud[]  = {0x00, 0x00, 0x1c, 0x3f, 0x7f, 0x7f, 0x00, 0x00};
-const unsigned char icon_rain[]   = {0x1c, 0x3f, 0x7f, 0x7f, 0x22, 0x44, 0x22, 0x00};
-const unsigned char icon_snow[]   = {0x24, 0x00, 0xbd, 0x3c, 0x3c, 0xbd, 0x00, 0x24};
-const unsigned char icon_storm[]  = {0x1c, 0x3f, 0x7f, 0x1c, 0x1c, 0x08, 0x10, 0x00};
-const unsigned char icon_moon[] = {0x1c, 0x38, 0x70, 0x70, 0x70, 0x38, 0x1c, 0x00};
-const unsigned char icon_fog[] = {0x00, 0x3e, 0x00, 0x7f, 0x00, 0x1c, 0x3e, 0x00};
-const unsigned char icon_lightning_rainy[] = {0x3c, 0x7e, 0x18, 0x3c, 0x0c, 0x1e, 0x21, 0x00};
-
-// --- CLOCK CONFIGURATION ---
-// Compact 5x8 font for the advanced clock
-const uint8_t font5x8[11][5] = {
-  {0x3E, 0x51, 0x49, 0x45, 0x3E}, // 0
-  {0x00, 0x42, 0x7F, 0x40, 0x00}, // 1
-  {0x42, 0x61, 0x51, 0x49, 0x46}, // 2
-  {0x21, 0x41, 0x45, 0x4B, 0x31}, // 3
-  {0x18, 0x14, 0x12, 0x7F, 0x10}, // 4
-  {0x27, 0x45, 0x45, 0x45, 0x39}, // 5
-  {0x3C, 0x4A, 0x49, 0x49, 0x30}, // 6
-  {0x01, 0x71, 0x09, 0x05, 0x03}, // 7
-  {0x36, 0x49, 0x49, 0x49, 0x36}, // 8
-  {0x06, 0x49, 0x49, 0x29, 0x1E}, // 9
-  {0x00, 0x36, 0x36, 0x00, 0x00}  // :
-};
 
 
 // ====================================================================
@@ -178,7 +136,7 @@ struct Config {
     // 1. Playback controls
     bool powerState;
     int brightness = 150;
-    int playMode = 0; // 0: GIFs, 1: Text, 2: Clock, 3: Arcade
+    int playMode = 0; // 0: GIFs, 1: Text, 3: Arcade
     String slidingText = "Retro Pixel LED v" + String(FIRMWARE_VERSION) + " - IP: " + WiFi.localIP().toString();
     int textSpeed = 50;
     int gifRepeats = 1;
@@ -186,32 +144,24 @@ struct Config {
     std::vector<String> activeFolders; 
     String activeFolders_str = "/GIFS";
     String activePlaylist;
-    // 2. Time/Date settings
-    String timeZone = TZ_STRING_SPAIN; 
-    bool format24h = true;
-    // 3. Clock mode settings
-    int clockEffect;
-    uint32_t clockColor = 0x00FF00;
-    bool autoClock;      // Enables/disables the automatic clock
-    int clockInterval;   // How many GIFs play before showing the clock
-    // 4. Scrolling text mode settings
+    // 2. Scrolling text mode settings
     uint32_t slidingTextColor = 0x00FF00;
-    // 5. Hardware/System settings
+    // 3. Hardware/System settings
     bool WifiOffMode; // WiFi-free mode
     int panelChain = 2; // "Number of chained LED panels"
     char device_name[40] = {0};
-    // 6. Configuration MQTT Home Assistant
+    // 4. Configuration MQTT Home Assistant
     bool mqtt_enabled = false;
     char mqtt_name[40] = "Retro Pixel LED"; // Friendly name for HA
     char mqtt_host[40] = "192.168.1.100";
     int mqtt_port = 1883;
     char mqtt_user[40] = "";
     char mqtt_pass[40] = "";
-    // 7. FTP SD access
+    // 5. FTP SD access
     bool ftp_enabled = false;
     char ftp_user[24] = "retropixel";
     char ftp_pass[24] = "retropixel";
-    // 7. Advanced hardware settings
+    // 6. Advanced hardware settings
     int minRefreshRate;  // Refresh rate
     int latchBlanking;   // For ghosting
     int i2sSpeed;        // 0=8Mhz 1=10Mhz, 2=16Mhz, 3=20Mhz
@@ -345,7 +295,6 @@ String fileManagerPage();
 void loadConfig();
 void savePlaybackConfig();
 void saveSystemConfig();
-void initTime();
 bool readSdWifiConfig(String& ssid, String& password);
 bool connectFromSdWifiConfig();
 
@@ -354,7 +303,6 @@ void showMessage(const char* messageText, uint16_t color);
 void listGifFiles();
 void runGifMode();
 void runTextMode();
-void runClockMode();
 void scanFolders();
 void beginFtpServer();
 void stopFtpServer();
@@ -377,6 +325,7 @@ void loadConfig() {
     config.powerState = preferences.getBool("powerState", true);
     config.brightness = preferences.getInt("brightness", 40); // Apply 15% default brightness
     config.playMode = preferences.getInt("playMode", 1);
+    if (config.playMode == 2 || config.playMode < 0 || config.playMode > 3) config.playMode = 0;
     config.activePlaylist = preferences.getString("actPlaylist", "auto"); // "auto" is the default value
     config.slidingText = preferences.getString("slidingText", config.slidingText);
     config.textSpeed = preferences.getInt("textSpeed", 50);
@@ -384,14 +333,9 @@ void loadConfig() {
     config.randomMode = preferences.getBool("randomMode", false);
     config.mqtt_enabled = preferences.getBool("mqtt_en", false);
     String mName = preferences.getString("m_name", "Retro Pixel LED");
-    config.timeZone = preferences.getString("timeZone", TZ_STRING_SPAIN);
-    config.clockEffect = preferences.getInt("clockEffect", 0);  
-    config.clockColor = preferences.getULong("clockColor", 0x00FF00);
     config.slidingTextColor = preferences.getULong("slideColor", 0x00FF00);
     config.WifiOffMode = preferences.getBool("WifiOffMode", false);
     config.panelChain = preferences.getInt("panelChain", 2);
-    config.autoClock = preferences.getBool("autoClock", false); // Default desactivado
-    config.clockInterval = preferences.getInt("clockInterval", 5); // Default every 5
     // Load advanced settings ---
     // Default 90Hz, Blanking 1, Speed 1 (10MHz)
     config.minRefreshRate = preferences.getInt("minRefresh", 120);
@@ -444,8 +388,6 @@ void savePlaybackConfig() {
     preferences.putInt("textSpeed", config.textSpeed);
     preferences.putInt("gifRepeats", config.gifRepeats);
     preferences.putBool("randomMode", config.randomMode);
-    preferences.putBool("autoClock", config.autoClock);
-    preferences.putInt("clockInterval", config.clockInterval);
     preferences.putString("actPlaylist", config.activePlaylist);
     
     // Save folders (serializing from vector to String)
@@ -466,10 +408,6 @@ void saveSystemConfig() {
     preferences.begin(PREF_NAMESPACE, false); // 'false' means write mode
     
     preferences.putBool("powerState", config.powerState);
-    preferences.putString("timeZone", config.timeZone);
-    preferences.putBool("format24h", config.format24h);
-    preferences.putInt("clockEffect", config.clockEffect);
-    preferences.putULong("clockColor", config.clockColor);;
     const char* newKey = "slideColor";
     preferences.putULong(newKey, config.slidingTextColor);
     preferences.putInt("panelChain", config.panelChain);
@@ -511,31 +449,6 @@ void handleFactoryReset() {
     ESP.restart();
 }
 
-
-// ====================================================================
-//                      CRITICAL TIME FUNCTION
-// ====================================================================
-void initTime() {
-    const char* tz_to_use = TZ_STRING_SPAIN;
-    if (!config.timeZone.isEmpty() && config.timeZone.length() >= 4) {
-        tz_to_use = config.timeZone.c_str();
-    } else {
-        Serial.println("WARNING: Empty/invalid time zone. Using safe default value.");
-    }
-    
-    configTzTime(tz_to_use, ntpServer); 
-    
-    Serial.printf("Configuring NTP with server: %s, Time Zone: %s\n", ntpServer, tz_to_use);
-    time_t now = time(nullptr);
-    int attempts = 0;
-    while (now < 10000 && attempts < 10) {
-        delay(500);
-        Serial.print(".");
-        now = time(nullptr);
-        attempts++;
-    }
-    Serial.println("");
-}
 
 bool readSdWifiConfig(String& ssid, String& password) {
     if (!sdMounted || !SD.exists(WIFI_CONFIG_FILE)) return false;
@@ -629,6 +542,7 @@ void handleSave() {
     // 1. Read existing arguments
     int tempBrightness = server.hasArg("b") ? server.arg("b").toInt() : config.brightness;
     int tempPlayMode = server.hasArg("pm") ? server.arg("pm").toInt() : config.playMode;
+    if (tempPlayMode == 2 || tempPlayMode < 0 || tempPlayMode > 3) tempPlayMode = 0;
     String tempSlidingText = server.hasArg("st") ? server.arg("st") : config.slidingText;
     int tempTextSpeed = server.hasArg("ts") ? server.arg("ts").toInt() : config.textSpeed;
     int tempGifRepeats = server.hasArg("r") ? server.arg("r").toInt() : config.gifRepeats;
@@ -646,19 +560,7 @@ void handleSave() {
         }
     }
 
-    if (server.hasArg("clockEffect")) config.clockEffect = server.arg("clockEffect").toInt();
-    if (server.hasArg("cc")) config.clockColor = parseHexColor(server.arg("cc"));
     if (server.hasArg("stc")) config.slidingTextColor = parseHexColor(server.arg("stc"));
-
-    // --- Auto Clock parsing ---
-    // If checkbox "ac" is present, it was checked (true)
-    config.autoClock = server.hasArg("ac"); 
-    
-    // If the "ci" interval is present, store it
-    if (server.hasArg("ci")) {
-        config.clockInterval = server.arg("ci").toInt();
-        if (config.clockInterval < 1) config.clockInterval = 1; // Seguridad
-    }
 
     // 2. Temporary folder management
     std::vector<String> tempFolders;
@@ -695,12 +597,10 @@ void handleSave() {
             Serial.println(">> Using Playlist: " + config.activePlaylist);
         }
         
-        playedGifCount = 0;
-        temporaryClockModeActive = false;
     }
 
     // 5. Save to Flash
-    savePlaybackConfig(); // Make sure this function stores autoClock and clockInterval in NVS
+    savePlaybackConfig();
 
     // 5.1 Release interruption if there was a change
     if (cambioPlaylist) {
@@ -733,18 +633,12 @@ void handleSaveConfig() {
     if (server.hasArg("mrr")) config.minRefreshRate = server.arg("mrr").toInt();
     if (server.hasArg("lb"))  config.latchBlanking = server.arg("lb").toInt();
 
-    // 3. Clock and WiFi settings (Mode Online/Offline)
+    // 3. WiFi settings (Online/Offline)
     if (server.hasArg("wifiOffMode")) {
         config.WifiOffMode = (server.arg("wifiOffMode") == "1");
     }
-    if (server.hasArg("tz")) config.timeZone = server.arg("tz");
-
-    if (server.hasArg("clockEffect")) {
-        config.clockEffect = server.arg("clockEffect").toInt();
-    }
 
     // 4. Colors and text
-    if (server.hasArg("cc")) config.clockColor = parseHexColor(server.arg("cc"));
     if (server.hasArg("stc")) config.slidingTextColor = parseHexColor(server.arg("stc"));
     if (server.hasArg("st")) { 
         config.slidingText = server.arg("st"); 
@@ -870,7 +764,6 @@ void handleRoot() {
     server.send(200, "text/html", ""); // Send headers only
 
     // --- VARIABLES ---
-    char hexColor[8]; sprintf(hexColor, "#%06X", config.clockColor);
     char hexTextColor[8]; sprintf(hexTextColor, "#%06X", config.slidingTextColor); 
     int brightnessPercent = (int)(((float)config.brightness / 255.0) * 100.0);
 
@@ -898,7 +791,6 @@ void handleRoot() {
     html += "<select name='pm' id='playModeSelect'>";
     html += String("<option value='0'") + (config.playMode == 0 ? " selected" : "") + ">📁 GIF Gallery</option>";
     html += String("<option value='1'") + (config.playMode == 1 ? " selected" : "") + ">📝 Scrolling Text</option>";
-    html += String("<option value='2'") + (config.playMode == 2 ? " selected" : "") + ">🕒 Clock Digital</option>";
     html += String("<option value='3'") + (config.playMode == 3 ? " selected" : "") + ">🕹️ Arcade</option></select></div>";
     server.sendContent(html);
 
@@ -906,19 +798,6 @@ void handleRoot() {
     html = "<div id='gifConfig' style='display:" + String(config.playMode == 0 ? "block" : "none") + ";'>";
     html += "<div class='card'><h3>Gallery Settings</h3>";
     
-    // Automatic Clock
-    html += "<div style='display:flex; align-items:center; justify-content:space-between; background:rgba(0,242,255,0.05); padding:10px; border-radius:8px; margin-bottom:15px; border:1px solid rgba(0,242,255,0.1);'>";
-    html += "  <label style='display:flex; align-items:center; cursor:pointer; font-size:13px; margin:0;'>";
-    html += "    <input type='checkbox' name='ac' onchange='toggleAutoClock(this.checked)' " + String(config.autoClock ? "checked" : "") + " style='margin-right:8px;'>";
-    html += "   🕒 Show Clock";
-    html += "  </label>";
-    html += "  <div id='autoClockSettings' style='display:" + String(config.autoClock ? "block" : "none") + ";'>";
-    html += "    <span style='font-size:12px; color:#888;'>Every: </span>";
-    html += "    <input type='number' name='ci' min='1' max='99' value='" + String(config.clockInterval) + "' style='width:45px; background:#111; border:1px solid #333; color:#00f2ff; text-align:center; border-radius:4px; padding:2px;'>";
-    html += "    <span style='font-size:12px; color:#888;'> GIFs</span>";
-    html += "  </div>";
-    html += "</div>";
-
     // Repeats and order
     html += "<div class='grid-2'>";
     html += " <div><label>Repeats</label><input type='number' name='r' min='1' max='50' value='" + String(config.gifRepeats) + "'></div>";
@@ -959,7 +838,7 @@ void handleRoot() {
     html += "</div></div></div></div>"; // Close foldersBlock and gifConfig
     server.sendContent(html);
 
-    // --- CHUNK 5: TEXT, CLOCK, AND FOOTER (Cleaned) ---
+    // --- CHUNK 5: TEXT AND FOOTER (Cleaned) ---
     html = "<div id='textConfig' style='display:" + String(config.playMode == 1 ? "block" : "none") + ";'>";
     html += "<div class='card'><h3>Configuration Text</h3>";
     html += "<label>Custom Message</label><input type='text' name='st' value='" + config.slidingText + "' maxlength='100'>";
@@ -968,17 +847,6 @@ void handleRoot() {
     html += " <div style='text-align:center;'><label>Color</label><input type='color' name='stc' value='" + String(hexTextColor) + "'></div>";
     html += "</div></div></div>"; 
 
-    html += "<div id='clockConfig' style='display:" + String(config.playMode == 2 ? "block" : "none") + ";'>";
-    html += "<div class='card'><h3>Configuration Clock</h3>";
-    html += "<div class='grid-2' style='align-items: center;'>";
-    html += " <div><label>Visual Effect</label><select name='clockEffect'>";
-    const char* effects[] = {"Rainbow Flow", "Static Rainbow", "Solid Neon", "Night Fire", "Pulse Breath", "Matrix Digital", "Color Gradient 50%", "Color Gradient 80%"};
-    for(int i = 0; i < 8; i++) {
-        html += "<option value='" + String(i) + "'" + (config.clockEffect == i ? " selected" : "") + ">" + effects[i] + "</option>";
-    }
-    html += " </select></div>";
-    html += " <div style='text-align:center;'><label>Base Color</label><input type='color' name='cc' value='" + String(hexColor) + "'></div>";
-    html += "</div></div></div>"; 
     server.sendContent(html);
 
     // Buttons and footer
@@ -994,13 +862,11 @@ void handleRoot() {
     html += "<script>";
     html += "function toggleFolders(v){ document.getElementById('foldersBlock').style.display = (v=='auto')?'block':'none'; }";
     html += "function updateBrightness(v){ document.getElementById('brightnessValue').innerHTML=Math.round((v/255)*100)+'%'; }";
-    html += "function toggleAutoClock(e){document.getElementById('autoClockSettings').style.display=e?'block':'none';}";
     html += "var sel = document.getElementById('playModeSelect');";
     html += "if(sel){ sel.onchange=function(){"; 
     html += " var m = this.value;";
     html += " document.getElementById('gifConfig').style.display = (m=='0')?'block':'none';";
     html += " document.getElementById('textConfig').style.display = (m=='1')?'block':'none';";
-    html += " document.getElementById('clockConfig').style.display = (m=='2')?'block':'none';";
     html += "};}"; 
     html += "</script></div></body></html>";
     
@@ -1028,18 +894,16 @@ void handleConfig() {
     html += "<title>Configuration</title><link rel='stylesheet' href='/style.css?v=3'></head><body><div class='c'>";
     html += "<h1>Configuration</h1><form action='/save_config' method='POST'>";
 
-    html += "<div class='card'><h2>1. WiFi y Clock</h2>";
+    html += "<div class='card'><h2>1. WiFi</h2>";
     html += "<label>Operating Mode</label><select name='wifiOffMode'>";
     html += "<option value='0'" + String(!config.WifiOffMode ? " selected" : "") + ">Online (requires WiFi network)</option>";
     html += "<option value='1'" + String(config.WifiOffMode ? " selected" : "") + ">Offline (does not require WiFi network)</option>";
     html += "</select>";
     html += "<div class='info-box' style='background: #332200; border-left: 4px solid #ffaa00; padding: 10px; margin-top: 10px;'>";
-    html += "⚠️ <b>Note:</b> In Offline mode the panel creates its own network. Connect to it to use Retro Pixel LED. The clock will not synchronize in this mode. ";
+    html += "⚠️ <b>Note:</b> In Offline mode the panel creates its own network. Connect to it to use Retro Pixel LED. ";
     html += "When changing modes, you must <b>Save and Restart</b>.";
     html += "<i>* If no WiFi network is configured within 3 minutes, Offline Mode is enabled automatically.</i></div><br>";
-
-    html += "<label>Time Zone (TZ String)</label><input type='text' name='tz' value='" + config.timeZone + "'>";
-    html += "<div class='info-box'>Default value for Spain: <code>" + String(TZ_STRING_SPAIN) + "</code>. <br>You can search for other time zones here: <a href='https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv' target='_blank' style='color:#00fbff;'>TZ String List</a>. DST is handled automatically.</div></div>";
+    html += "</div>";
     server.sendContent(html);
 
     // --- CHUNK 2: HARDWARE ---
@@ -1598,39 +1462,7 @@ static int32_t GIFSeekFile(GIFFILE *pFile, int32_t iPosition)
     return pFile->iPos;
 }
 
-// --- 2. Color and drawing functions ---
-// Convert HSV colors to RGB565 format (Rainbow effect)
-uint16_t hsvTo565(uint16_t h, uint8_t s, uint8_t v) {
-    float fH = h / 60.0;
-    float fS = s / 255.0;
-    float fV = v / 255.0;
-    float c = fV * fS;
-    float x = c * (1 - fabs(fmod(fH, 2.0) - 1));
-    float m = fV - c;
-    float r, g, b;
-    if (fH < 1) { r = c; g = x; b = 0; }
-    else if (fH < 2) { r = x; g = c; b = 0; }
-    else if (fH < 3) { r = 0; g = c; b = x; }
-    else if (fH < 4) { r = 0; g = x; b = c; }
-    else if (fH < 5) { r = x; g = 0; b = c; }
-    else { r = c; g = 0; b = x; }
-    return ((uint16_t)((r + m) * 31) << 11) | ((uint16_t)((g + m) * 63) << 5) | (uint16_t)((b + m) * 31);
-}
-
-// Draw a character using the 5x8 font
-void drawCustomChar(int x, int y, int index, uint16_t color, int scale) {
-    for (int i = 0; i < 5; i++) {
-        uint8_t line = font5x8[index][i];
-        for (int j = 0; j < 8; j++) {
-            if (line & (1 << j)) {
-                display->fillRect(x + (i * scale), y + (j * scale), scale, scale, color);
-            }
-        }
-    }
-}
-
-
-// --- 3. Display utility functions ---
+// --- 2. Display utility functions ---
 
 void showMessage(const char* messageText, uint16_t color = 0xF800 ) {
     if (!display) return;
@@ -1642,58 +1474,6 @@ void showMessage(const char* messageText, uint16_t color = 0xF800 ) {
     display->print(messageText);
     display->flipDMABuffer();
 }
-
-// --- 4. Function for notification area ---
-
-void drawNotificationBar() {
-
-    // Calculate the start index as in the clock
-    int offset = (display->width() - 0) / 2; 
-
-    // 1. Font configuration
-    display->setFont(NULL);      // Default font (5x7)
-    display->setTextSize(1);     // Size original
-
-    // 2. Clear the top strip across the whole screen
-        display->fillRect(128, 0, 128, 8, 0); 
-     
-    // 3. Draw icon according to MQTT
-    uint16_t weatherColor;
-    const unsigned char* iconToDraw;
-
-    switch(mqtt_weather_icon) {
-        case 0: iconToDraw = icon_sun;   weatherColor = display->color565(255, 255, 0); break;
-        case 1: iconToDraw = icon_cloud; weatherColor = display->color565(180, 180, 180); break;
-        case 2: iconToDraw = icon_rain;  weatherColor = display->color565(0, 100, 255); break;
-        case 3: iconToDraw = icon_snow;  weatherColor = display->color565(255, 255, 255); break;
-        case 4: iconToDraw = icon_storm; weatherColor = display->color565(200, 0, 200); break;
-        case 5: iconToDraw = icon_moon; weatherColor = display->color565(200, 200, 255); break;
-        case 6: iconToDraw = icon_lightning_rainy; weatherColor = display->color565(200, 0, 255); break;
-        case 7: iconToDraw = icon_fog; weatherColor = display->color565(180, 180, 200); break;
-        default: iconToDraw = icon_sun;  weatherColor = display->color565(255, 255, 0); break;
-    }
-    display->drawBitmap(offset + 97, 0, iconToDraw, 8, 8, weatherColor);
-
-    // 4. Draw Temperature
-    display->setTextColor(display->color565(200, 200, 200));
-    display->setCursor(offset + 107, 0); 
-    display->print(mqtt_temp);
-    if(mqtt_temp != "--") {
-        // Draw a small 2x2 square for the degree symbol
-        display->drawRect(offset + 119, 0, 2, 2, display->color565(200, 200, 200));
-        display->setCursor(offset + 122, 0);
-        display->print("C");
-    }
-
-    // 5. Notification
-    if (mqtt_custom_msg != "") {
-        display->setCursor(offset + 2, 0);
-        display->setTextColor(display->color565(200, 200, 200));
-        display->print(mqtt_custom_msg);
-    }
-    
-}
-
 
 // ====================================================================
 //                  FOLDER AND LIST SCAN FUNCTION FOR THE UI
@@ -2064,109 +1844,6 @@ void runTextMode() {
     }
 }
 
-// 2. Run complete clock mode HH:MM:SS
-void runClockMode() {
-    struct tm timeinfo;
-    if (!getLocalTime(&timeinfo)) return;
-
-    static int minAnterior = -1;
-    static int previousMode = -1;
-    static int estiloAnterior = -1;
-
-    // 1. DYNAMIC POSITIONING MANAGEMENT
-    // If MQTT is active: startY = 9 (clock lower). If MQTT is off: startY = 6 (clock higher).
-    int startY = config.mqtt_enabled ? 9 : 6;
-    
-    // If the minute or mode changes, clear everything to avoid artifacts
-    if (previousMode != config.playMode || timeinfo.tm_min != minAnterior || estiloAnterior != config.clockEffect) {
-        display->fillScreen(0); 
-        minAnterior = timeinfo.tm_min;
-        previousMode = config.playMode;
-        estiloAnterior = config.clockEffect; 
-        Serial.println("Clock: Refresh due to style or time change.");
-    }
-
-    // 2. CLOCK PREPARATION
-    char fullTimeStr[9]; 
-    strftime(fullTimeStr, sizeof(fullTimeStr), "%H:%M:%S", &timeinfo);
-     
-    int startX = 128; 
-    uint32_t ms = millis();
-
-    // 3. DRAW CLOCK DIGITS
-    for (int i = 0; i < 8; i++) {
-        int xPos = startX + (i * 16);
-        
-        // Clear only the rectangle for this digit to avoid global flicker
-        display->fillRect(xPos, startY, 15, 24, 0); 
-
-        uint16_t color;
-        switch (config.clockEffect) {
-            case 0: color = hsvTo565((ms / 25 + xPos) % 360, 255, 255); break;
-            case 1: color = hsvTo565((ms / 50 + (i * 40)) % 360, 255, 255); break;
-            case 2: // Solid Neon
-                {
-                    uint8_t r = (config.clockColor >> 16) & 0xFF;
-                    uint8_t g = (config.clockColor >> 8) & 0xFF;
-                    uint8_t b = config.clockColor & 0xFF;
-                    color = display->color565(r, g, b); 
-                }
-                break;
-            case 3: color = hsvTo565((int)(5 + sin(ms / 500.0) * 10) % 360, 255, 200); break;
-            case 4: // Pulse Breath
-                {
-                    float factor = 0.85 + (0.15 * sin(ms / 159.0)); 
-                    uint8_t r = (config.clockColor >> 16) & 0xFF;
-                    uint8_t g = (config.clockColor >> 8) & 0xFF;
-                    uint8_t b = config.clockColor & 0xFF;
-                    color = display->color565(r * factor, g * factor, b * factor);
-                }
-                break;
-            case 5: // Matrix Digital
-                {
-                    int brilliance = 195 + (sin((ms / 200.0) + i) * 60);
-                    if (brilliance < 80) brilliance = 80; 
-                    color = display->color565(0, brilliance, 0);
-                }
-                break;
-            case 6: // Gradient 50%
-                {
-                    uint8_t r1 = (config.clockColor >> 16) & 0xFF;
-                    uint8_t g1 = (config.clockColor >> 8) & 0xFF;
-                    uint8_t b1 = config.clockColor & 0xFF;
-                    float ratio = i / 14.0;
-                    color = display->color565(r1 + (255 - r1) * ratio, g1 + (255 - g1) * ratio, b1 + (255 - b1) * ratio);
-                }
-                break;
-            case 7: // Gradient 80%
-                {
-                    uint8_t r1 = (config.clockColor >> 16) & 0xFF;
-                    uint8_t g1 = (config.clockColor >> 8) & 0xFF;
-                    uint8_t b1 = config.clockColor & 0xFF;
-                    float ratio = i / 8.75;
-                    color = display->color565(r1 + (255 - r1) * ratio, g1 + (255 - g1) * ratio, b1 + (255 - b1) * ratio);
-                }
-                break;    
-            default: color = 0xFFFF; break;
-        }
-
-        // Draw the digit
-        if (fullTimeStr[i] >= '0' && fullTimeStr[i] <= '9') {
-            drawCustomChar(xPos, startY, fullTimeStr[i] - '0', color, 3);
-        } else if (fullTimeStr[i] == ':') {
-            if (timeinfo.tm_sec % 2 == 0) {
-                display->fillRect(xPos + 6, startY + 6, 3, 3, color);
-                display->fillRect(xPos + 6, startY + 15, 3, 3, color);
-            }
-        }
-    }
-
-    // 4. DRAW THE NOTIFICATION BAR (only when MQTT is active)
-    if (config.mqtt_enabled) {
-        drawNotificationBar();
-    }
-}
-
 void runArcadeMode() {
     // If we get here while already in manager mode, exit before opening anything
     if (inFileManagerMode) return;
@@ -2222,7 +1899,7 @@ void sendMQTTDiscovery() {
     // 3. ENTITIES (Use technicalID so topics are unique per panel)
     
     // --- MODE SELECT ---
-    String modeConfig = "{\"name\":\"Mode\",\"stat_t\":\"retropixel/" + technicalID + "/state/mode\",\"cmd_t\":\"retropixel/" + technicalID + "/cmd/mode\",\"options\":[\"GIFs\",\"Clock\",\"Text\",\"Arcade\"],\"uniq_id\":\"" + technicalID + "_mode\"" + deviceJSON + "}";
+    String modeConfig = "{\"name\":\"Mode\",\"stat_t\":\"retropixel/" + technicalID + "/state/mode\",\"cmd_t\":\"retropixel/" + technicalID + "/cmd/mode\",\"options\":[\"GIFs\",\"Text\",\"Arcade\"],\"uniq_id\":\"" + technicalID + "_mode\"" + deviceJSON + "}";
     mqttClient.publish(("homeassistant/select/" + technicalID + "/mode/config").c_str(), modeConfig.c_str(), true);
 
     // --- SWITCH POWER ---
@@ -2238,14 +1915,6 @@ void sendMQTTDiscovery() {
     mqttClient.publish(("homeassistant/text/" + technicalID + "/text/config").c_str(), textConfig.c_str(), true);
     // Force the state update with the current ESP32 value
     mqttClient.publish(("retropixel/" + technicalID + "/state/text").c_str(), config.slidingText.c_str(), true);
-
-    // --- CLOCK STYLE SELECTOR --- 
-    String clockStyleConfig = "{\"name\":\"Clock Style\",\"stat_t\":\"retropixel/" + technicalID + "/state/clock_style\",\"cmd_t\":\"retropixel/" + technicalID + "/cmd/clock_style\",\"options\":[\"Rainbow Flow\",\"Static Rainbow\",\"Solid Neon\",\"Night Fire\",\"Pulse Breath\",\"Matrix Digital\",\"Gradient 50%\",\"Gradient 80%\"],\"uniq_id\":\"" + technicalID + "_clock_style\"" + deviceJSON + "}";
-    mqttClient.publish(("homeassistant/select/" + technicalID + "/clock_style/config").c_str(), clockStyleConfig.c_str(), true);
-
-    // --- COLOR WHEEL FOR CLOCK ---
-    String clockLightConfig = "{\"name\":\"Clock Color\",\"stat_t\":\"retropixel/" + technicalID + "/state/clock_color\",\"cmd_t\":\"retropixel/" + technicalID + "/cmd/clock_color\",\"rgb_cmd_t\":\"retropixel/" + technicalID + "/cmd/clock_color/set\",\"rgb_stat_t\":\"retropixel/" + technicalID + "/state/clock_color/set\",\"payload_on\":\"ON\",\"payload_off\":\"OFF\",\"uniq_id\":\"" + technicalID + "_clock_rgb\"" + deviceJSON + "}";  
-    mqttClient.publish(("homeassistant/light/" + technicalID + "/clock_color/config").c_str(), clockLightConfig.c_str(), true);
 
     // --- COLOR WHEEL FOR TEXT ---
     String textLightConfig = "{\"name\":\"Text Color\",\"stat_t\":\"retropixel/" + technicalID + "/state/text_color\",\"cmd_t\":\"retropixel/" + technicalID + "/cmd/text_color\",\"rgb_cmd_t\":\"retropixel/" + technicalID + "/cmd/text_color/set\",\"rgb_stat_t\":\"retropixel/" + technicalID + "/state/text_color/set\",\"payload_on\":\"ON\",\"payload_off\":\"OFF\",\"uniq_id\":\"" + technicalID + "_text_rgb\"" + deviceJSON + "}";    
@@ -2319,14 +1988,13 @@ void callback(char* topic, byte* payload, unsigned int length) {
     Serial.println("MQTT received [" + strTopic + "]: " + message);
 
     // ----------------------------------------------------
-    // 1. MODE CONTROL (GIFs, Text, Clock, Arcade)
+    // 1. MODE CONTROL (GIFs, Text, Arcade)
     // ----------------------------------------------------
     if (strTopic.endsWith("/cmd/mode")) {
         int previousMode = config.playMode; // Store the previous mode
 
         if (message == "GIFs")      config.playMode = 0;
         else if (message == "Text") config.playMode = 1;
-        else if (message == "Clock") config.playMode = 2;
         else if (message == "Arcade") config.playMode = 3;
 
         if (config.playMode == 0) {
@@ -2379,58 +2047,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
         Serial.println("New MQTT text (slidingText): " + message);
     }
     // ----------------------------------------------------
-    // 5. NOTIFICATIONS AND TIME
-    // ---------------------------------------------------- 
-    else if (strTopic.endsWith("/cmd/temp")) {
-         mqtt_temp = message; 
-         Serial.println("MQTT temperature received: " + mqtt_temp);
-    }
-    else if (strTopic.endsWith("/cmd/weather")) { 
-        mqtt_weather_icon = message.toInt(); 
-        Serial.println("MQTT Weather (Icon ID): " + String(mqtt_weather_icon));
-    }
-    else if (strTopic.endsWith("/cmd/notify")) { 
-        mqtt_custom_msg = message; 
-        Serial.println("MQTT Notification: " + mqtt_custom_msg);
-    }
-    /// ----------------------------------------------------
-    // 6. CLOCK STYLE CONTROL
-    // ----------------------------------------------------
-    if (strTopic.endsWith("/cmd/clock_style")) {
-        message.trim();
-        int selected = -1;
-        if (message.equalsIgnoreCase("Rainbow Flow"))      selected = 0;
-        else if (message.equalsIgnoreCase("Static Rainbow")) selected = 1;
-        else if (message.equalsIgnoreCase("Solid Neon"))     selected = 2;
-        else if (message.equalsIgnoreCase("Night Fire"))     selected = 3;
-        else if (message.equalsIgnoreCase("Pulse Breath"))   selected = 4;
-        else if (message.equalsIgnoreCase("Matrix Digital")) selected = 5;
-        else if (message.equalsIgnoreCase("Gradient 50%"))   selected = 6;
-        else if (message.equalsIgnoreCase("Gradient 80%"))   selected = 7;
-
-        if (selected != -1) {
-            config.clockEffect = selected;
-            saveSystemConfig();
-            mqttClient.publish((stateTopicPrefix + "clock_style").c_str(), message.c_str(), true);
-            if(config.playMode == 2) display->fillScreen(0);
-            Serial.printf("MQTT style ID %d applied.\n", selected);
-        }
-    }
-    // ----------------------------------------------------
-    // 7. CLOCK COLOR CONTROL (RGB WHEEL)
-    // ----------------------------------------------------
-    if (strTopic.endsWith("/cmd/clock_color/set")) {
-        int r, g, b;
-        if (sscanf(message.c_str(), "%d,%d,%d", &r, &g, &b) == 3) {
-            config.clockColor = (uint32_t)((r << 16) | (g << 8) | b);
-            mqttClient.publish((stateTopicPrefix + "clock_color/set").c_str(), message.c_str(), true);
-            mqttClient.publish((stateTopicPrefix + "clock_color").c_str(), "ON", true);
-            saveSystemConfig();
-            if(config.playMode == 2) display->fillScreen(0);
-        }
-    }
-    // ----------------------------------------------------
-    // 8. TEXT COLOR CONTROL (RGB WHEEL)
+    // 5. TEXT COLOR CONTROL (RGB WHEEL)
     // ----------------------------------------------------
     if (strTopic.endsWith("/cmd/text_color/set")) {
         int r, g, b;
@@ -2439,13 +2056,6 @@ void callback(char* topic, byte* payload, unsigned int length) {
             mqttClient.publish((stateTopicPrefix + "text_color/set").c_str(), message.c_str(), true);
             saveSystemConfig();
         }
-    }
-
-    // ----------------------------------------------------
-    // 9. NOTIFICATION BAR
-    // ----------------------------------------------------
-    if (config.playMode == 2 && (strTopic.indexOf("temp") != -1 || strTopic.indexOf("weather") != -1 || strTopic.indexOf("notify") != -1)) {
-        drawNotificationBar();
     }
 }
 
@@ -2462,34 +2072,22 @@ void syncMQTTState() {
     switch (config.playMode) {
         case 0:  modeText = "GIFs";   break;
         case 1:  modeText = "Text";  break;
-        case 2:  modeText = "Clock";  break;
         case 3:  modeText = "Arcade"; break;
         default: modeText = "GIFs";   break;
     }
 
-
-    // 4. Prepare clock effect names
-    const char* effectNames[] = {"Rainbow Flow", "Static Rainbow", "Solid Neon", "Night Fire", "Pulse Breath", "Matrix Digital", "Gradient 50%", "Gradient 80%"};
-    String currentEffectName = "Rainbow Flow";
-    if(config.clockEffect >= 0 && config.clockEffect <= 7) {
-        currentEffectName = String(effectNames[config.clockEffect]);
-    }
-    
-    // 5. Helper function to convert color to R,G,B format for Home Assistant
+    // 4. Helper function to convert color to R,G,B format for Home Assistant
     auto toRGBStr = [](uint32_t c) {
         return String((c >> 16) & 0xFF) + "," + String((c >> 8) & 0xFF) + "," + String(c & 0xFF);
     };
 
-    // 6. Send basic states
+    // 5. Send basic states
     mqttClient.publish((stateTopicPrefix + "mode").c_str(), modeText.c_str(), true);
     mqttClient.publish((stateTopicPrefix + "bright").c_str(), String(config.brightness).c_str(), true);
     mqttClient.publish((stateTopicPrefix + "power").c_str(), (config.powerState ? "ON" : "OFF"), true);
     mqttClient.publish((stateTopicPrefix + "text").c_str(), config.slidingText.c_str(), true);
-    mqttClient.publish((stateTopicPrefix + "clock_style").c_str(), currentEffectName.c_str(), true);
 
-    // 7. Synchronize color wheels (lights in HA)
-    mqttClient.publish((stateTopicPrefix + "clock_color").c_str(), "ON", true);
-    mqttClient.publish((stateTopicPrefix + "clock_color/set").c_str(), toRGBStr(config.clockColor).c_str(), true);
+    // 6. Synchronize color wheel (light in HA)
     mqttClient.publish((stateTopicPrefix + "text_color").c_str(), "ON", true);
     mqttClient.publish((stateTopicPrefix + "text_color/set").c_str(), toRGBStr(config.slidingTextColor).c_str(), true);
     
@@ -2982,8 +2580,6 @@ void setup() {
         Serial.println("ERROR: Could not allocate memory for the LED matrix.");
     }
     
-    initTime();
-    
     // --- 7. WEB SERVER ROUTE CONFIGURATION ---
     server.on("/", HTTP_GET, handleRoot);
     server.on("/power", HTTP_GET, handlePower);
@@ -3230,37 +2826,14 @@ void TaskDisplay(void * pvParameters) {
         if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(100))) {
             if (display) { 
         
-                // A) TEMPORARY CLOCK LOGIC (If active)
-                if (temporaryClockModeActive) {
-                    // If the time expired, return to normal mode
-                    if (millis() - forcedClockStartTime >= CLOCK_DURATION_MS) {
-                        temporaryClockModeActive = false;
-                        playedGifCount = 0; // Reset counter
-                    } else {
-                        runClockMode(); // Show the clock
-                    }
-                } 
-
-                // B) NORMAL MODE LOGIC
-                else {
-                    switch (config.playMode) {
-                        case 0: // Gallery Mode
-                            runGifMode(); 
-                    
-                            // If the user enabled the function, increment the counter
-                            if (config.autoClock) {
-                                playedGifCount++;
-                                if (playedGifCount >= config.clockInterval) {
-                                    temporaryClockModeActive = true;
-                                    forcedClockStartTime = millis();
-                                }
-                            }
-                            break;
-                    
-                        case 1: runTextMode(); break;
-                        case 2: runClockMode(); break;
-                        case 3: runArcadeMode(); break;
-                    }
+                switch (config.playMode) {
+                    case 0: runGifMode(); break;
+                    case 1: runTextMode(); break;
+                    case 3: runArcadeMode(); break;
+                    default:
+                        config.playMode = 0;
+                        runGifMode();
+                        break;
                 }
             }
             xSemaphoreGive(sdMutex);

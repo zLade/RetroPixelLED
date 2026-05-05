@@ -11,6 +11,7 @@
 * **Arcade Text Fallback:** Recalbox events now include the readable game title, and Arcade Mode uses it as scrolling text when no exact game GIF is found.
 * **FTP SD Access:** Added an optional built-in FTP server for local WinSCP access to the SD card.
 * **SD WiFi Bootstrap:** Added optional `/wifi_config.txt` support so WiFi credentials can be preloaded from the SD card before the configuration portal starts.
+* **Recalbox-Focused Firmware Trim:** Removed compiled clock, auto-clock, NTP, weather icons, and weather/clock MQTT controls to reduce flash usage and keep the runtime focused on GIF, text, and arcade display.
 
 ## [4.0.0] - 2026-03-21
 

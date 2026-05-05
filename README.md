@@ -6,7 +6,7 @@
 
 **Retro Pixel LED** is advanced firmware for ESP32 devices that control HUB75 LED matrix panels, such as P2.5, P4, and similar RGB matrix panels, through a full web interface.
 
-It turns an LED matrix into a retro information and artwork display with animated GIF playback, scrolling text, an NTP-synchronized clock, Batocera/RetroPie arcade integration, Home Assistant control, and SD card file management.
+It turns an LED matrix into a retro artwork display with animated GIF playback, scrolling text, Batocera/Recalbox/RetroPie arcade integration, Home Assistant control, and SD card file management.
 
 Version **4.0.0** introduces **dynamic playlists**, allowing instant switching between themed GIF collections without waiting for a full SD card re-index.
 
@@ -26,7 +26,6 @@ A **Lite** version is also available here: [RetroPixelLED-Lite](https://github.c
 | **Instant Switching** | Hardware-level playback interruption through `interruptPlayback`. | Mode, playlist, and Batocera changes stop the current GIF immediately. |
 | **PC Playlist Tool** | Optimized interactive Windows `.bat` script. | Create clean ESP32-ready playlists in seconds. |
 | **NVS Persistence** | Active playlist is stored in ESP32 flash memory. | The panel remembers the selected mode or playlist after restart. |
-| **Auto Clock Interval** | Timed interruption cycle. | Show the clock every X GIFs without manually changing mode. |
 | **External CSS** | Web style moved to `/style.css` on the SD card. | Frees RAM and allows browser caching. |
 | **Eco-Energy Mode** | Dynamic frequency scaling between 80 MHz and 240 MHz. | Reduces heat and consumption while the panel is off. |
 
@@ -34,13 +33,12 @@ A **Lite** version is also available here: [RetroPixelLED-Lite](https://github.c
 
 * **Playlist System:** Create playlist text files on the SD card with exact GIF paths and switch between them from the web UI.
 * **Real-Time Interruption:** Web, brightness, mode, playlist, and Batocera changes are applied atomically between ESP32 cores.
-* **Auto Clock Logic:** The panel can interrupt GIF playback every configurable number of GIFs, display the clock for 10 seconds, then resume the gallery.
 * **Smart Web Engine:** Chunked transfer encoding sends large pages and folder lists without exhausting ESP32 RAM.
 * **Smart Energy Management:** CPU speed drops from 240 MHz to 80 MHz when the matrix is off, while WiFi and Home Assistant remain available.
 * **Dual Core Engine:** Core 0 handles WiFi, Web, and MQTT. Core 1 handles GIF decoding and rendering.
 * **True Random Engine:** Uses the ESP32 hardware random generator instead of predictable software randomness.
 * **Infinite GIF List:** Reads GIF paths directly from SD cache files to support very large collections.
-* **Arcade Mode:** Native Batocera/RetroPie integration. The panel changes GIFs according to the selected or launched game.
+* **Arcade Mode:** Native Batocera/Recalbox/RetroPie integration. The panel changes GIFs according to the selected or launched game.
 * **FileManager Pro:** Upload, delete, and organize GIFs through the web UI without removing the Micro SD card.
 * **SD Mutex:** Protects SD card access between cores.
 
@@ -149,7 +147,7 @@ After the device joins your local network, open its IP address in a browser.
 
 Available controls:
 
-* Real-time mode switching between **GIF Gallery**, **Clock**, **Scrolling Text**, and **Arcade**.
+* Real-time mode switching between **GIF Gallery**, **Scrolling Text**, and **Arcade**.
 * LED brightness control from 0 to 100%.
 * SD file browser for uploading, deleting, and organizing GIFs.
 * Scrolling text editor with color and speed controls.
@@ -310,79 +308,12 @@ On startup, Retro Pixel LED tries these credentials before opening the WiFiManag
 Available entities:
 
 * `switch.retro_pixel_led_state`: turn the matrix on or off.
-* `select.retro_pixel_led_mode`: select `GIFs`, `Clock`, `Text`, or `Arcade`.
+* `select.retro_pixel_led_mode`: select `GIFs`, `Text`, or `Arcade`.
 * `number.retro_pixel_led_brightness`: brightness control from 0 to 255.
-* `select.retro_pixel_led_clock_style`: select one of the clock styles.
-* `light.retro_pixel_led_clock_color`: RGB clock color.
 * `text.retro_pixel_led_display_text`: scrolling text message.
 * `light.retro_pixel_led_text_color`: RGB text color.
 
-Weather and notification topics use the device ID:
-
-* `retropixel/retropixel_ID/cmd/weather`
-* `retropixel/retropixel_ID/cmd/temp`
-* `retropixel/retropixel_ID/cmd/notify`
-
 The ID is the last six characters of the ESP32 MAC address and appears in the serial monitor.
-
-### Weather Icon IDs
-
-| ID | State | Icon |
-| :--- | :--- | :--- |
-| **0** | Clear / Sun | Sun |
-| **1** | Cloudy | Cloud |
-| **2** | Rain | Rain cloud |
-| **3** | Snow | Snow |
-| **4** | Storm | Lightning cloud |
-| **5** | Night | Moon |
-| **6** | Thunderstorm rain | Lightning and rain |
-| **7** | Fog | Fog |
-| **Default** | Default | Sun |
-
-### Home Assistant YAML Example
-
-```yaml
-alias: Update Retro Pixel LED Weather
-description: Send temperature and weather icons to Retro Pixel LED
-triggers:
-  - entity_id: sensor.aemet_temperature
-    trigger: state
-  - entity_id: weather.aemet
-    trigger: state
-actions:
-  - data:
-      topic: retropixel/retropixel_ID/cmd/temp
-      payload: "{{ states('sensor.aemet_temperature') | round(0) }}"
-    action: mqtt.publish
-  - data:
-      topic: retropixel/retropixel_ID/cmd/weather
-      payload: >
-        {% set state = states('weather.aemet') %}
-        {% if state == 'sunny' %} 0
-        {% elif state == 'cloudy' or state == 'partlycloudy' %} 1
-        {% elif state == 'rainy' or state == 'pouring' %} 2
-        {% elif state == 'snowy' or state == 'snowy-rainy' %} 3
-        {% elif state == 'lightning' %} 4
-        {% elif state == 'clear-night' %} 5
-        {% elif state == 'lightning-rainy' %} 6
-        {% elif state == 'fog' %} 7
-        {% else %} 0
-        {% endif %}
-    action: mqtt.publish
-```
-
-Notification script example:
-
-```yaml
-alias: Retro Pixel LED Notification
-sequence:
-  - data:
-      topic: retropixel/retropixel_ID/cmd/notify
-      payload: Home Assistant notification
-    action: mqtt.publish
-mode: single
-icon: mdi:cellphone-sound
-```
 
 ## Performance Cache
 
@@ -430,4 +361,4 @@ Special thanks to:
 * **WiFiManager**
 * **DMDos Telegram community**
 * **RpiTeam** for the GIF collection: [Neo-Arcadia forum thread](https://www.neo-arcadia.com/forum/viewtopic.php?t=67065)
-* **joseAveleira** for the weather notification idea in the clock: [RelojPixel](https://github.com/joseAveleira/RelojPixel/tree/main/src)
+* **joseAveleira** for prior notification-display inspiration: [RelojPixel](https://github.com/joseAveleira/RelojPixel/tree/main/src)
