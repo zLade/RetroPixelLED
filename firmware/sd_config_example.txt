@@ -30,8 +30,8 @@ DISPLAY_X_OFFSET=128
 VIEWPORT_WIDTH=128
 
 # GIF storage.
-GIF_ROOT=/batocera
-DEFAULT_GIF=/default.gif
+GIF_ROOT=/gif
+DEFAULT_GIF=/gif/default.gif
 
 # Rotate dkong.gif, dkong_2.gif, dkong_3.gif every 10 seconds.
 GIF_INTERVAL_SECONDS=10

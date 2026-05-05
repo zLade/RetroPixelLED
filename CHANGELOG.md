@@ -4,8 +4,8 @@
 
 ### Added
 
-* **Recalbox Event Script:** Added a userscript integration that reads `/tmp/es_state.inf` and sends compatible Arcade Mode commands to the existing Retro Pixel LED `/batocera` endpoint.
-* **Dedicated Recalbox Firmware:** Replaced the general-purpose ESP32 firmware with a single-purpose Recalbox companion build that reads `/config.txt`, connects to WiFi, receives `/batocera` events, and displays matching game GIFs.
+* **Recalbox Event Script:** Added a userscript integration that reads `/tmp/es_state.inf` and sends game display commands to the Retro Pixel LED `/gif` endpoint.
+* **Dedicated Recalbox Firmware:** Replaced the general-purpose ESP32 firmware with a single-purpose Recalbox companion build that reads `/config.txt`, connects to WiFi, receives `/gif` events, and displays matching game GIFs.
 * **GIF Variant Rotation:** Added automatic rotation for game GIF variants such as `dkong.gif`, `dkong_2.gif`, and `dkong_3.gif`.
 * **Title Fallback:** Added continuous scrolling text fallback when no GIF exists for the current game.
 * **Default GIF Boot State:** Added default GIF playback before a game is launched and after game exit.
@@ -16,13 +16,14 @@
 * **Recalbox-Only Scope:** Removed the web UI, FTP, MQTT/Home Assistant, OTA, WiFiManager portal, clock, weather, playlist browser, and all unrelated runtime paths.
 * **Arcade Text Fallback:** Recalbox events include the readable game title, and the firmware uses it as scrolling text when no exact game GIF is found.
 * **Documentation Reset:** Rewrote the README around the dedicated Recalbox workflow and `/config.txt` SD configuration.
+* **GIF Naming Cleanup:** Renamed the SD GIF root and HTTP input to `/gif` so the Recalbox build no longer uses legacy arcade-system naming.
 
 ## [4.0.0] - 2026-03-21
 
 ### Added - Playlist & Instant Response Update
 
 * **Dynamic Playlist System:** Added support for multiple custom playlists using `.txt` files in `/playlists`. Users can switch themed collections from the web UI without scanning the entire SD card again.
-* **Atomic Render Interruption:** Added the global `interruptPlayback` flag synchronized between cores. Playlist, mode, and Batocera changes now stop the current GIF instantly.
+* **Atomic Render Interruption:** Added the global `interruptPlayback` flag synchronized between cores. Playlist, mode, and remote game changes now stop the current GIF instantly.
 * **Playlist Generator Script v1.0.1:** Added an interactive Windows tool that creates playlist files, detects folders, normalizes ESP32 paths, and creates the SD playlist directory automatically.
 * **Playlist NVS Persistence:** The system remembers and restores the last selected playlist after restart.
 
@@ -70,7 +71,7 @@
 
 ### Optimized
 
-* **Arcade Visual Fix:** Removed the intrusive `FILES MODE` label during remote Batocera commands.
+* **Arcade Visual Fix:** Removed the intrusive `FILES MODE` label during remote game commands.
 * **Task Handling:** Refined `TaskDisplay` priority to reduce stutter during frequency changes.
 
 ### Compatibility
@@ -124,7 +125,7 @@
 
 ### Added
 
-* **Arcade Mode:** Initial Batocera script integration.
+* **Arcade Mode:** Initial arcade event script integration.
 * **Dual Core Engine:** First stable implementation using `vTaskCreatePinnedToCore`.
 * **FileManager:** Web file upload.
 

@@ -113,7 +113,7 @@ send_to_panel() {
       --max-time "$CURL_TIMEOUT" \
       --data-urlencode "s=$panel_system" \
       --data-urlencode "g=$panel_game" \
-      "http://$IP_ESP32/batocera" > /dev/null 2>&1 &
+      "http://$IP_ESP32/gif" > /dev/null 2>&1 &
   else
     curl -s -G \
       --connect-timeout "$CURL_TIMEOUT" \
@@ -121,7 +121,7 @@ send_to_panel() {
       --data-urlencode "s=$panel_system" \
       --data-urlencode "g=$panel_game" \
       --data-urlencode "t=$panel_title" \
-      "http://$IP_ESP32/batocera" > /dev/null 2>&1 &
+      "http://$IP_ESP32/gif" > /dev/null 2>&1 &
   fi
 }
 
@@ -180,7 +180,7 @@ SYSTEM_NAME="$(get_val "System")"
 STATE="$(to_lower "$(get_val "State")")"
 
 # SystemId is the Recalbox short id and normally matches the ROM folder
-# used by the Retro Pixel LED Batocera cache, for example snes or neogeo.
+# used by the Retro Pixel LED GIF folder, for example snes or neogeo.
 SYSTEM="$(system_from_rom_path "$ROM")"
 if is_empty_value "$SYSTEM"; then
   SYSTEM="$SYSTEM_ID"

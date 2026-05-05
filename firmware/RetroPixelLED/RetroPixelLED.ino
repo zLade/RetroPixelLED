@@ -13,7 +13,7 @@
 // Single-purpose firmware:
 // - Reads /config.txt from the SD card.
 // - Connects to WiFi using that config.
-// - Receives Recalbox events on /batocera?s=<system>&g=<game>&t=<title>.
+// - Receives Recalbox events on /gif?s=<system>&g=<game>&t=<title>.
 // - Shows game GIFs, rotating variants every configured interval.
 // - Falls back to scrolling the game title when no matching GIF exists.
 // - Shows default.gif before a game is launched.
@@ -68,8 +68,8 @@ struct AppConfig {
   int textPauseMs = 250;
   bool showTitleBetweenGifs = true;
 
-  String gifRoot = "/batocera";
-  String defaultGif = "/default.gif";
+  String gifRoot = "/gif";
+  String defaultGif = "/gif/default.gif";
 
   int minRefreshRate = 120;
   int latchBlanking = 1;
@@ -494,12 +494,10 @@ std::vector<String> findGameGifs(const String& systemId, const String& gameId) {
 
   if (system.length() > 0) addUniqueString(dirs, joinPath(root, system));
   addUniqueString(dirs, root);
-  if (root != "/batocera") {
-    if (system.length() > 0) addUniqueString(dirs, joinPath("/batocera", system));
-    addUniqueString(dirs, "/batocera");
+  if (root != "/gif") {
+    if (system.length() > 0) addUniqueString(dirs, joinPath("/gif", system));
+    addUniqueString(dirs, "/gif");
   }
-  if (system.length() > 0) addUniqueString(dirs, joinPath("/gifs", system));
-  addUniqueString(dirs, "/gifs");
   addUniqueString(dirs, "/");
 
   std::vector<GifVariant> variants;
@@ -521,9 +519,7 @@ std::vector<String> findDefaultGifs() {
   scanDirectoryForVariants(dirnameOf(configured), stemOf(configured), variants);
   scanDirectoryForVariants("/", "default", variants);
   scanDirectoryForVariants(config.gifRoot, "default", variants);
-  scanDirectoryForVariants(joinPath(config.gifRoot, "default"), "_default", variants);
-  scanDirectoryForVariants("/batocera/default", "_default", variants);
-  scanDirectoryForVariants("/batocera", "default", variants);
+  scanDirectoryForVariants(joinPath(config.gifRoot, "default"), "default", variants);
 
   return variantsToPaths(variants);
 }
@@ -711,7 +707,7 @@ void handleHttpClient() {
     query = target.substring(q + 1);
   }
 
-  if (path == "/batocera" || path == "/recalbox") {
+  if (path == "/gif") {
     handleRecalboxQuery(query);
     sendHttpResponse(client, 200, "OK\n");
   } else if (path == "/status") {

@@ -12,15 +12,15 @@ This build intentionally removes the general-purpose features from the original 
 2. Recalbox sends the current game to the ESP32 through:
 
    ```text
-   http://ESP32_IP/batocera?s=<system>&g=<game>&t=<readable title>
+   http://ESP32_IP/gif?s=<system>&g=<game>&t=<readable title>
    ```
 
 3. The firmware searches for GIFs matching the ROM basename:
 
    ```text
-   /batocera/fbneo/dkong.gif
-   /batocera/fbneo/dkong_2.gif
-   /batocera/fbneo/dkong_3.gif
+   /gif/fbneo/dkong.gif
+   /gif/fbneo/dkong_2.gif
+   /gif/fbneo/dkong_3.gif
    ```
 
 4. If several GIFs exist for the same game, they rotate every `GIF_INTERVAL_SECONDS`.
@@ -37,7 +37,7 @@ Recommended layout:
 ```text
 /config.txt
 /default.gif
-/batocera/
+/gif/
   fbneo/
     dkong.gif
     dkong_2.gif
@@ -45,12 +45,6 @@ Recommended layout:
     sfiii3.gif
   snes/
     zelda3.gif
-```
-
-The firmware also keeps compatibility with the older default path:
-
-```text
-/batocera/default/_default.gif
 ```
 
 ## `/config.txt`
@@ -79,8 +73,8 @@ DISPLAY_X_OFFSET=128
 VIEWPORT_WIDTH=128
 
 # Playback
-GIF_ROOT=/batocera
-DEFAULT_GIF=/default.gif
+GIF_ROOT=/gif
+DEFAULT_GIF=/gif/default.gif
 GIF_INTERVAL_SECONDS=10
 TEXT_SPEED_MS=35
 TEXT_PAUSE_MS=250
@@ -136,13 +130,13 @@ The script follows the official Recalbox EmulationStation userscript contract by
 The firmware exposes only the minimal input needed by Recalbox:
 
 ```text
-GET /batocera?s=fbneo&g=dkong&t=Donkey%20Kong
+GET /gif?s=fbneo&g=dkong&t=Donkey%20Kong
 ```
 
 Useful test from a PC:
 
 ```powershell
-curl "http://192.168.1.108/batocera?s=fbneo&g=dkong&t=Donkey%20Kong"
+curl "http://192.168.1.108/gif?s=fbneo&g=dkong&t=Donkey%20Kong"
 ```
 
 Status endpoint:
@@ -162,7 +156,7 @@ arduino-cli compile --fqbn esp32:esp32:esp32 firmware/RetroPixelLED
 Current validation build:
 
 ```text
-Flash: 1,034,866 bytes / 78%
+Flash: 1,034,438 bytes / 78%
 RAM:   73,004 bytes / 22%
 ```
 
