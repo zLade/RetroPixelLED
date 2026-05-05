@@ -296,6 +296,17 @@ Enable it from **Settings > FTP SD Access**, then connect with:
 
 FTP is disabled by default. Enable it only on a trusted local network because it gives write access to the SD card. During transfers the panel pauses playback so GIF reads and SD writes do not collide.
 
+## SD WiFi Bootstrap
+
+If the first WiFi configuration portal is inconvenient, create `/wifi_config.txt` at the root of the SD card before booting:
+
+```ini
+SSID=YourWifiName
+PASSWORD=YourWifiPassword
+```
+
+On startup, Retro Pixel LED tries these credentials before opening the WiFiManager portal. If the connection succeeds, the normal web interface is available directly on the router-assigned IP address. If it fails, the device falls back to the usual configuration portal.
+
 Available entities:
 
 * `switch.retro_pixel_led_state`: turn the matrix on or off.

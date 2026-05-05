@@ -25,6 +25,7 @@
 #define GIFS_BASE_PATH "/gifs" // Base directory for GIFs
 #define GIF_CACHE_FILE "/gif_cache.txt" // File used to store the GIF index
 #define GIF_CACHE_SIG "/gif_cache.sig" // Signature file
+#define WIFI_CONFIG_FILE "/wifi_config.txt" // Optional SD WiFi bootstrap file
 #define M5STACK_SD SD
 
 // --- NEW HUB75 PIN DEFINITION ---
@@ -345,6 +346,8 @@ void loadConfig();
 void savePlaybackConfig();
 void saveSystemConfig();
 void initTime();
+bool readSdWifiConfig(String& ssid, String& password);
+bool connectFromSdWifiConfig();
 
 // Display and mode control functions
 void showMessage(const char* messageText, uint16_t color);
@@ -532,6 +535,65 @@ void initTime() {
         attempts++;
     }
     Serial.println("");
+}
+
+bool readSdWifiConfig(String& ssid, String& password) {
+    if (!sdMounted || !SD.exists(WIFI_CONFIG_FILE)) return false;
+
+    File file = SD.open(WIFI_CONFIG_FILE, FILE_READ);
+    if (!file) return false;
+
+    while (file.available()) {
+        String line = file.readStringUntil('\n');
+        line.trim();
+        if (line == "" || line.startsWith("#")) continue;
+
+        int separator = line.indexOf('=');
+        if (separator < 0) separator = line.indexOf(':');
+        if (separator < 0) continue;
+
+        String key = line.substring(0, separator);
+        String value = line.substring(separator + 1);
+        key.trim();
+        value.trim();
+        key.toUpperCase();
+
+        if ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'"))) {
+            value = value.substring(1, value.length() - 1);
+        }
+
+        if (key == "SSID" || key == "WIFI_SSID") ssid = value;
+        else if (key == "PASSWORD" || key == "PASS" || key == "WIFI_PASSWORD") password = value;
+    }
+
+    file.close();
+    return ssid.length() > 0;
+}
+
+bool connectFromSdWifiConfig() {
+    String sdSsid;
+    String sdPassword;
+    if (!readSdWifiConfig(sdSsid, sdPassword)) return false;
+
+    Serial.println("SD WiFi config found. Connecting to: " + sdSsid);
+    WiFi.mode(WIFI_AP_STA);
+    WiFi.begin(sdSsid.c_str(), sdPassword.c_str());
+
+    unsigned long start = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - start < 25000) {
+        delay(500);
+        Serial.print(".");
+    }
+    Serial.println("");
+
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("Connected using SD WiFi config. IP: " + WiFi.localIP().toString());
+        config.slidingText = "Retro Pixel LED v" + String(FIRMWARE_VERSION) + " - IP: " + WiFi.localIP().toString();
+        return true;
+    }
+
+    Serial.println("SD WiFi config connection failed. Falling back to configuration portal.");
+    return false;
 }
 
 // ====================================================================
@@ -2817,7 +2879,14 @@ void setup() {
     wm.setConfigPortalBlocking(false); 
     //wm.setConfigPortalTimeout(180); // Wait 3 minutes, then continue
 
-    if (config.WifiOffMode) {
+    bool connectedFromSd = false;
+    if (!config.WifiOffMode) {
+        connectedFromSd = connectFromSdWifiConfig();
+    }
+
+    if (connectedFromSd) {
+        Serial.println("WiFiManager portal skipped because SD WiFi config succeeded.");
+    } else if (config.WifiOffMode) {
         // SCENARIO A: Offline mode configured
         Serial.println("Offline mode enabled. Creating local network...");
         WiFi.mode(WIFI_AP);
