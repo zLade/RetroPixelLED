@@ -1,0 +1,47 @@
+# Copy this file to /config.txt at the root of the ESP32 SD card.
+
+# WiFi
+SSID=YourWifiName
+PASSWORD=YourWifiPassword
+HOSTNAME=retropixel-recalbox
+
+# Network: DHCP by default.
+DHCP=true
+
+# Static IP example:
+# DHCP=false
+# IP=192.168.1.108
+# GATEWAY=192.168.1.1
+# SUBNET=255.255.255.0
+# DNS=192.168.1.1
+# DNS2=8.8.8.8
+
+# LED matrix brightness: 0-255.
+BRIGHTNESS=40
+
+# Standard 128x32 matrix, two 64x32 panels:
+# PANEL_CHAIN=2
+# DISPLAY_X_OFFSET=0
+# VIEWPORT_WIDTH=128
+
+# 256x32 DMD-style setup with GIFs on the right 128 pixels:
+PANEL_CHAIN=4
+DISPLAY_X_OFFSET=128
+VIEWPORT_WIDTH=128
+
+# GIF storage.
+GIF_ROOT=/batocera
+DEFAULT_GIF=/default.gif
+
+# Rotate dkong.gif, dkong_2.gif, dkong_3.gif every 10 seconds.
+GIF_INTERVAL_SECONDS=10
+
+# Scrolling title displayed between multiple GIFs, and as fallback when no GIF exists.
+TEXT_SPEED_MS=35
+TEXT_PAUSE_MS=250
+SHOW_TITLE_BETWEEN_GIFS=true
+
+# HUB75 tuning.
+MIN_REFRESH_RATE=120
+LATCH_BLANKING=1
+I2S_SPEED=2

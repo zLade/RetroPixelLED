@@ -5,13 +5,17 @@
 ### Added
 
 * **Recalbox Event Script:** Added a userscript integration that reads `/tmp/es_state.inf` and sends compatible Arcade Mode commands to the existing Retro Pixel LED `/batocera` endpoint.
+* **Dedicated Recalbox Firmware:** Replaced the general-purpose ESP32 firmware with a single-purpose Recalbox companion build that reads `/config.txt`, connects to WiFi, receives `/batocera` events, and displays matching game GIFs.
+* **GIF Variant Rotation:** Added automatic rotation for game GIF variants such as `dkong.gif`, `dkong_2.gif`, and `dkong_3.gif`.
+* **Title Fallback:** Added continuous scrolling text fallback when no GIF exists for the current game.
+* **Default GIF Boot State:** Added default GIF playback before a game is launched and after game exit.
+* **SD Config Example:** Added `firmware/sd_config_example.txt` documenting WiFi, brightness, static IP, matrix viewport, and playback settings.
 
 ### Changed
 
-* **Arcade Text Fallback:** Recalbox events now include the readable game title, and Arcade Mode uses it as scrolling text when no exact game GIF is found.
-* **FTP SD Access:** Added an optional built-in FTP server for local WinSCP access to the SD card.
-* **SD WiFi Bootstrap:** Added optional `/wifi_config.txt` support so WiFi credentials can be preloaded from the SD card before the configuration portal starts.
-* **Recalbox-Focused Firmware Trim:** Removed compiled clock, auto-clock, NTP, weather icons, and weather/clock MQTT controls to reduce flash usage and keep the runtime focused on GIF, text, and arcade display.
+* **Recalbox-Only Scope:** Removed the web UI, FTP, MQTT/Home Assistant, OTA, WiFiManager portal, clock, weather, playlist browser, and all unrelated runtime paths.
+* **Arcade Text Fallback:** Recalbox events include the readable game title, and the firmware uses it as scrolling text when no exact game GIF is found.
+* **Documentation Reset:** Rewrote the README around the dedicated Recalbox workflow and `/config.txt` SD configuration.
 
 ## [4.0.0] - 2026-03-21
 
